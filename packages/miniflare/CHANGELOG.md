@@ -1,5 +1,82 @@
 # miniflare
 
+## 3.20250224.0
+
+### Patch Changes
+
+- [#8338](https://github.com/cloudflare/workers-sdk/pull/8338) [`2d40989`](https://github.com/cloudflare/workers-sdk/commit/2d409892f1cf08f07f84d25dcab023bc20ada374) Thanks [@GregBrimble](https://github.com/GregBrimble)! - feat: Upload \_headers and \_redirects if present with Workers Assets as part of `wrangler deploy` and `wrangler versions upload`.
+
+- [#8251](https://github.com/cloudflare/workers-sdk/pull/8251) [`da568e5`](https://github.com/cloudflare/workers-sdk/commit/da568e5a94bf270cfdcd80123d8161fc5437dcd2) Thanks [@dependabot](https://github.com/apps/dependabot)! - chore: update dependencies of "miniflare" package
+
+  The following dependency versions have been updated:
+
+  | Dependency                | From          | To            |
+  | ------------------------- | ------------- | ------------- |
+  | workerd                   | 1.20250214.0  | 1.20250224.0  |
+  | @cloudflare/workers-types | ^4.20250214.0 | ^4.20250224.0 |
+
+- [#8288](https://github.com/cloudflare/workers-sdk/pull/8288) [`cf14e17`](https://github.com/cloudflare/workers-sdk/commit/cf14e17d40b9e51475ba4d9ee6b4e3ef5ae5e841) Thanks [@CarmenPopoviciu](https://github.com/CarmenPopoviciu)! - feat: Add assets Proxy Worker skeleton in miniflare
+
+  This commit implements a very basic Proxy Worker skeleton, and wires it in the "pipeline" miniflare creates for assets. This Worker will be incrementally worked on, but for now, the current implementation will forward all incoming requests to the Router Worker, thus leaving the current assets behaviour in local dev, the same.
+
+  This is an experimental feature available under the `--x-assets-rpc` flag: `wrangler dev --x-assets-rpc`.
+
+- [#8355](https://github.com/cloudflare/workers-sdk/pull/8355) [`79c7810`](https://github.com/cloudflare/workers-sdk/commit/79c781076cc79e512753b65644c027138aa1d878) Thanks [@GregBrimble](https://github.com/GregBrimble)! - fix: Add default empty router config for assets in Miniflare
+
+## 3.20250214.2
+
+### Patch Changes
+
+- [#8274](https://github.com/cloudflare/workers-sdk/pull/8274) [`fce642d`](https://github.com/cloudflare/workers-sdk/commit/fce642d59264b1b6e7df8a6c9a015519b7574637) Thanks [@emily-shen](https://github.com/emily-shen)! - fix bindings to entrypoints on the same worker in workers with assets
+
+- [#8289](https://github.com/cloudflare/workers-sdk/pull/8289) [`a4909cb`](https://github.com/cloudflare/workers-sdk/commit/a4909cbe552eae72b901cd78bf1f814f818085a0) Thanks [@penalosa](https://github.com/penalosa)! - Add the experimental `--x-assets-rpc` flag to gate feature work to support JSRPC with Workers + Assets projects.
+
+## 3.20250214.1
+
+### Patch Changes
+
+- [#8247](https://github.com/cloudflare/workers-sdk/pull/8247) [`a9a4c33`](https://github.com/cloudflare/workers-sdk/commit/a9a4c33143b9f58673ac0cdd251957997275fa10) Thanks [@GregBrimble](https://github.com/GregBrimble)! - feat: Omits Content-Type header for files of an unknown extension in Workers Assets
+
+- [#8239](https://github.com/cloudflare/workers-sdk/pull/8239) [`6cae13a`](https://github.com/cloudflare/workers-sdk/commit/6cae13aa5f338cee18ec2e43a5dadda0c7d8dc2e) Thanks [@edmundhung](https://github.com/edmundhung)! - fix: allow the `fetchMock` option to be parsed upfront before passing it to Miniflare
+
+## 3.20250214.0
+
+### Patch Changes
+
+- [#8171](https://github.com/cloudflare/workers-sdk/pull/8171) [`5e06177`](https://github.com/cloudflare/workers-sdk/commit/5e06177861b29aa9b114f9ecb50093190af94f4b) Thanks [@dependabot](https://github.com/apps/dependabot)! - chore: update dependencies of "miniflare" package
+
+  The following dependency versions have been updated:
+
+  | Dependency                | From          | To            |
+  | ------------------------- | ------------- | ------------- |
+  | workerd                   | 1.20250204.0  | 1.20250214.0  |
+  | @cloudflare/workers-types | ^4.20250204.0 | ^4.20250214.0 |
+
+## 3.20250204.1
+
+### Patch Changes
+
+- [#7950](https://github.com/cloudflare/workers-sdk/pull/7950) [`4db1fb5`](https://github.com/cloudflare/workers-sdk/commit/4db1fb5696412c6666589a778184e10386294d71) Thanks [@cmackenzie1](https://github.com/cmackenzie1)! - Add local binding support for Worker Pipelines
+
+## 3.20250204.0
+
+### Patch Changes
+
+- [#8032](https://github.com/cloudflare/workers-sdk/pull/8032) [`c80dbd8`](https://github.com/cloudflare/workers-sdk/commit/c80dbd8d5e53a081cf600e250f1ddda860be1a12) Thanks [@dependabot](https://github.com/apps/dependabot)! - chore: update dependencies of "miniflare" package
+
+  The following dependency versions have been updated:
+
+  | Dependency                | From          | To            |
+  | ------------------------- | ------------- | ------------- |
+  | workerd                   | 1.20250129.0  | 1.20250204.0  |
+  | @cloudflare/workers-types | ^4.20250129.0 | ^4.20250204.0 |
+
+- [#7290](https://github.com/cloudflare/workers-sdk/pull/7290) [`0c0374c`](https://github.com/cloudflare/workers-sdk/commit/0c0374cce3908a47f7459ba4810855c1ce124349) Thanks [@emily-shen](https://github.com/emily-shen)! - fix: add support for workers with assets when running multiple workers in one `wrangler dev` instance
+
+  https://github.com/cloudflare/workers-sdk/pull/7251 added support for running multiple Workers in one `wrangler dev`/miniflare session. e.g. `wrangler dev -c wrangler.toml -c ../worker2/wrangler.toml`, which among other things, allowed cross-service RPC to Durable Objects.
+
+  However this did not work in the same way as production when there was a Worker with assets - this PR should fix that.
+
 ## 3.20250129.0
 
 ### Patch Changes
@@ -542,20 +619,20 @@
   import { Miniflare } from "miniflare";
 
   const mf = new Miniflare({
-    workers: [
-      {
-        wrappedBindings: {
-          Greeter: {
-            scriptName: "impl",
-          },
-        },
-        modules: true,
-        script: `export default { fetch(){ return new Response(''); } }`,
-      },
-      {
-        modules: true,
-        name: "impl",
-        script: `
+  	workers: [
+  		{
+  			wrappedBindings: {
+  				Greeter: {
+  					scriptName: "impl",
+  				},
+  			},
+  			modules: true,
+  			script: `export default { fetch(){ return new Response(''); } }`,
+  		},
+  		{
+  			modules: true,
+  			name: "impl",
+  			script: `
   				class Greeter {
   					sayHello(name) {
   						return "Hello " + name;
@@ -566,8 +643,8 @@
   					return new Greeter();
   				}
   			`,
-      },
-    ],
+  		},
+  	],
   });
 
   const { Greeter } = await mf.getBindings();
@@ -587,21 +664,21 @@
   import { Miniflare } from "miniflare";
 
   const mf = new Miniflare({
-    workers: [
-      {
-        modules: true,
-        script: `export default { fetch() { return new Response(''); } }`,
-        serviceBindings: {
-          SUM: {
-            name: "sum-worker",
-            entrypoint: "SumEntrypoint",
-          },
-        },
-      },
-      {
-        modules: true,
-        name: "sum-worker",
-        script: `
+  	workers: [
+  		{
+  			modules: true,
+  			script: `export default { fetch() { return new Response(''); } }`,
+  			serviceBindings: {
+  				SUM: {
+  					name: "sum-worker",
+  					entrypoint: "SumEntrypoint",
+  				},
+  			},
+  		},
+  		{
+  			modules: true,
+  			name: "sum-worker",
+  			script: `
   				import { WorkerEntrypoint } from 'cloudflare:workers';
   
   				export default { fetch() { return new Response(''); } }
@@ -612,8 +689,8 @@
   					}
   				}
   			`,
-      },
-    ],
+  		},
+  	],
   });
 
   const { SUM } = await mf.getBindings();
@@ -679,17 +756,17 @@
   import { kCurrentWorker, Miniflare } from "miniflare";
 
   const mf = new Miniflare({
-    workers: [
-      {
-        name: "a",
-        serviceBindings: {
-          A_RPC_SERVICE: { name: kCurrentWorker, entrypoint: "RpcEntrypoint" },
-          A_NAMED_SERVICE: { name: "a", entrypoint: "namedEntrypoint" },
-          B_NAMED_SERVICE: { name: "b", entrypoint: "anotherNamedEntrypoint" },
-        },
-        compatibilityFlags: ["rpc"],
-        modules: true,
-        script: `
+  	workers: [
+  		{
+  			name: "a",
+  			serviceBindings: {
+  				A_RPC_SERVICE: { name: kCurrentWorker, entrypoint: "RpcEntrypoint" },
+  				A_NAMED_SERVICE: { name: "a", entrypoint: "namedEntrypoint" },
+  				B_NAMED_SERVICE: { name: "b", entrypoint: "anotherNamedEntrypoint" },
+  			},
+  			compatibilityFlags: ["rpc"],
+  			modules: true,
+  			script: `
   			import { WorkerEntrypoint } from "cloudflare:workers";
   
   			export class RpcEntrypoint extends WorkerEntrypoint {
@@ -702,17 +779,17 @@
   
   			...
   			`,
-      },
-      {
-        name: "b",
-        modules: true,
-        script: `
+  		},
+  		{
+  			name: "b",
+  			modules: true,
+  			script: `
   			export const anotherNamedEntrypoint = {
   				fetch(request, env, ctx) { return new Response("b:named:pong"); }
   			};
   			`,
-      },
-    ],
+  		},
+  	],
   });
   ```
 
@@ -830,12 +907,12 @@
   import { Miniflare, Response } from "miniflare";
 
   const mf = new Miniflare({
-    serviceBindings: {
-      SERVICE(request, instance) {
-        assert(instance === mf);
-        return new Response();
-      },
-    },
+  	serviceBindings: {
+  		SERVICE(request, instance) {
+  			assert(instance === mf);
+  			return new Response();
+  		},
+  	},
   });
   ```
 
@@ -855,27 +932,27 @@
   import { Miniflare } from "miniflare";
 
   const mf1 = new Miniflare({
-    scriptPath: "index.mjs",
+  	scriptPath: "index.mjs",
   });
 
   const mf2 = new Miniflare({
-    rootPath: "a/b",
-    scriptPath: "c/index.mjs",
+  	rootPath: "a/b",
+  	scriptPath: "c/index.mjs",
   });
 
   const mf3 = new Miniflare({
-    rootPath: "/a/b",
-    workers: [
-      {
-        name: "1",
-        rootPath: "c",
-        scriptPath: "index.mjs",
-      },
-      {
-        name: "2",
-        scriptPath: "index.mjs",
-      },
-    ],
+  	rootPath: "/a/b",
+  	workers: [
+  		{
+  			name: "1",
+  			rootPath: "c",
+  			scriptPath: "index.mjs",
+  		},
+  		{
+  			name: "2",
+  			scriptPath: "index.mjs",
+  		},
+  	],
   });
   ```
 
@@ -891,11 +968,11 @@
   import { kCurrentWorker, Miniflare } from "miniflare";
 
   const mf = new Miniflare({
-    serviceBindings: {
-      SELF: kCurrentWorker,
-    },
-    modules: true,
-    script: `export default {
+  	serviceBindings: {
+  		SELF: kCurrentWorker,
+  	},
+  	modules: true,
+  	script: `export default {
       fetch(request, env, ctx) {
         const { pathname } = new URL(request.url);
         if (pathname === "/recurse") {
@@ -920,9 +997,9 @@
 
   ```js
   const mf = new Miniflare({
-    modules: true,
-    modulesRoot: "..",
-    scriptPath: "../worker.mjs",
+  	modules: true,
+  	modulesRoot: "..",
+  	scriptPath: "../worker.mjs",
   });
   ```
 
@@ -980,15 +1057,15 @@
 
   ```js
   const mf = new Miniflare({
-    modules: [
-      {
-        type: "PythonModule",
-        path: "index",
-        contents:
-          "from js import Response;\ndef fetch(request):\n  return Response.new('hello')",
-      },
-    ],
-    compatibilityFlags: ["experimental"],
+  	modules: [
+  		{
+  			type: "PythonModule",
+  			path: "index",
+  			contents:
+  				"from js import Response;\ndef fetch(request):\n  return Response.new('hello')",
+  		},
+  	],
+  	compatibilityFlags: ["experimental"],
   });
   ```
 
@@ -1125,9 +1202,9 @@
 
   ```ts
   const mf = new Miniflare({
-    log,
-    modules: true,
-    script: `
+  	log,
+  	modules: true,
+  	script: `
         export default {
             fetch(req, env, ctx) {
                 const two = env.UNSAFE_EVAL.eval('1+1');
@@ -1135,7 +1212,7 @@
             }
         }
     `,
-    unsafeEvalBinding: "UNSAFE_EVAL",
+  	unsafeEvalBinding: "UNSAFE_EVAL",
   });
   ```
 

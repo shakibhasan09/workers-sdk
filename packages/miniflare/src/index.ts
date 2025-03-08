@@ -63,7 +63,10 @@ import {
 	WorkerOptions,
 	WrappedBindingNames,
 } from "./plugins";
-import { ROUTER_SERVICE_NAME } from "./plugins/assets/constants";
+import {
+	ROUTER_SERVICE_NAME,
+	RPC_PROXY_SERVICE_NAME,
+} from "./plugins/assets/constants";
 import {
 	CUSTOM_SERVICE_KNOWN_OUTBOUND,
 	CustomServiceKind,
@@ -1130,14 +1133,6 @@ export class Miniflare {
 			innerBindings: Worker_Binding[];
 		}[] = [];
 
-		if (this.#workerOpts[0].assets.assets) {
-			// This will be the UserWorker, or the vitest pool worker wrapping the UserWorker
-			// The asset plugin needs this so that it can set the binding between the RouterWorker and the UserWorker
-			// TODO: apply this to ever this.#workerOpts, not just the first (i.e this.#workerOpts[0])
-			this.#workerOpts[0].assets.assets.workerName =
-				this.#workerOpts[0].core.name;
-		}
-
 		for (let i = 0; i < allWorkerOpts.length; i++) {
 			const previousWorkerOpts = allPreviousWorkerOpts?.[i];
 			const workerOpts = allWorkerOpts[i];
@@ -1150,6 +1145,12 @@ export class Miniflare {
 					// The workflows plugin needs this so that it can set the binding between the Engine and the UserWorker
 					workflow.scriptName ??= workerOpts.core.name;
 				}
+			}
+
+			if (workerOpts.assets.assets) {
+				// This will be the UserWorker, or the vitest pool worker wrapping the UserWorker
+				// The asset plugin needs this so that it can set the binding between the RouterWorker and the UserWorker
+				workerOpts.assets.assets.workerName = workerOpts.core.name;
 			}
 
 			// Collect all bindings from this worker
@@ -1202,12 +1203,38 @@ export class Miniflare {
 								});
 							}
 						}
+						if ("service" in binding) {
+							const targetWorkerName = binding.service?.name?.replace(
+								"core:user:",
+								""
+							);
+
+							/*
+							 * If we are running multiple Workers in a single dev session,
+							 * and this is a binding to a Worker with assets, we want that
+							 * binding to point to the Router Worker or the Assets Proxy
+							 * Worker, if the `unsafeEnableAssetsRpc` flag is enabled
+							 */
+							const maybeAssetTargetService = allWorkerOpts.find(
+								(worker) =>
+									worker.core.name === targetWorkerName && worker.assets.assets
+							);
+							if (maybeAssetTargetService && !binding.service?.entrypoint) {
+								assert(binding.service?.name);
+								binding.service.name = this.#sharedOpts.core
+									.unsafeEnableAssetsRpc
+									? `${RPC_PROXY_SERVICE_NAME}:${targetWorkerName}`
+									: `${ROUTER_SERVICE_NAME}:${targetWorkerName}`;
+							}
+						}
 					}
 				}
 			}
 
 			// Collect all services required by this worker
 			const unsafeStickyBlobs = sharedOpts.core.unsafeStickyBlobs ?? false;
+			const unsafeEnableAssetsRpc =
+				sharedOpts.core.unsafeEnableAssetsRpc ?? false;
 			const unsafeEphemeralDurableObjects =
 				workerOpts.core.unsafeEphemeralDurableObjects ?? false;
 			const pluginServicesOptionsBase: Omit<
@@ -1227,6 +1254,7 @@ export class Miniflare {
 				unsafeEphemeralDurableObjects,
 				queueProducers,
 				queueConsumers,
+				unsafeEnableAssetsRpc,
 			};
 			for (const [key, plugin] of PLUGIN_ENTRIES) {
 				const pluginServicesExtensions = await plugin.getServices({
@@ -1298,14 +1326,21 @@ export class Miniflare {
 		const globalServices = getGlobalServices({
 			sharedOptions: sharedOpts.core,
 			allWorkerRoutes,
-			// if Workers + Assets project but NOT Vitest, point to router Worker instead
-			// if Vitest with assets, the self binding on the test runner will point to RW
+			/*
+			 * - if Workers + Assets project but NOT Vitest, point to Router Worker or
+			 *   Proxy Worker depending on whether experimental flag `unsafeEnableAssetsRpc`
+			 *   was set
+			 * - if Vitest with assets, the self binding on the test runner will point to
+			 *   Router Worker
+			 */
 			fallbackWorkerName:
 				this.#workerOpts[0].assets.assets &&
 				!this.#workerOpts[0].core.name?.startsWith(
 					"vitest-pool-workers-runner-"
 				)
-					? ROUTER_SERVICE_NAME
+					? this.#sharedOpts.core.unsafeEnableAssetsRpc
+						? `${RPC_PROXY_SERVICE_NAME}:${this.#workerOpts[0].core.name}`
+						: `${ROUTER_SERVICE_NAME}:${this.#workerOpts[0].core.name}`
 					: getUserServiceName(this.#workerOpts[0].core.name),
 			loopbackPort,
 			log: this.#log,
@@ -1340,7 +1375,6 @@ export class Miniflare {
 					"Ensure wrapped bindings don't have bindings to themselves."
 			);
 		}
-
 		return { services: servicesArray, sockets, extensions };
 	}
 

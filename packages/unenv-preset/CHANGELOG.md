@@ -1,5 +1,20 @@
 # @cloudflare/unenv-preset
 
+## 2.0.0
+
+### Major Changes
+
+- [#8322](https://github.com/cloudflare/workers-sdk/pull/8322) [`ff96a70`](https://github.com/cloudflare/workers-sdk/commit/ff96a7091439a4645772778295fd373f1a51718b) Thanks [@vicb](https://github.com/vicb)! - Sync the cloudflare preset with `unenv@2.0.0-rc.8`
+
+  - The preset is now delivered as ESM only
+  - A polyfill is added for perf_hooks
+
+## 1.1.2
+
+### Patch Changes
+
+- [#7998](https://github.com/cloudflare/workers-sdk/pull/7998) [`576d931`](https://github.com/cloudflare/workers-sdk/commit/576d931d1a1ac59fb777966d3bddd4a4ce9acd92) Thanks [@vicb](https://github.com/vicb)! - Use builtin implementation for isArray and isDeepStrictEqual
+
 ## 1.1.1
 
 ### Patch Changes

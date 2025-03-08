@@ -1,4 +1,4 @@
-import ws from "ws";
+import { WebSocketServer } from "ws";
 import { UNKNOWN_HOST } from "./shared";
 import { nodeHeadersToWebHeaders } from "./utils";
 import type { Fetcher } from "@cloudflare/workers-types/experimental";
@@ -15,7 +15,7 @@ export function handleWebSocket(
 	fetcher: ReplaceWorkersTypes<Fetcher>["fetch"],
 	logger: vite.Logger
 ) {
-	const nodeWebSocket = new ws.Server({ noServer: true });
+	const nodeWebSocket = new WebSocketServer({ noServer: true });
 
 	httpServer.on(
 		"upgrade",
@@ -61,8 +61,14 @@ export function handleWebSocket(
 					});
 
 					// Forward client events to Worker
-					clientWebSocket.on("message", (event: ArrayBuffer | string) => {
-						workerWebSocket.send(event);
+					clientWebSocket.on("message", (data, isBinary) => {
+						workerWebSocket.send(
+							isBinary
+								? Array.isArray(data)
+									? Buffer.concat(data)
+									: data
+								: data.toString()
+						);
 					});
 					clientWebSocket.on("error", (error) => {
 						logger.error(`WebSocket error:\n${error.stack || error.message}`, {

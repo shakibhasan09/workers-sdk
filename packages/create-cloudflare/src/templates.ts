@@ -18,21 +18,16 @@ import {
 	writeFile,
 	writeJSON,
 } from "helpers/files";
-import angularTemplateExperimental from "templates-experimental/angular/c3";
 import astroTemplateExperimental from "templates-experimental/astro/c3";
-import docusaurusTemplateExperimental from "templates-experimental/docusaurus/c3";
-import gatsbyTemplateExperimental from "templates-experimental/gatsby/c3";
 import assetsOnlyTemplateExperimental from "templates-experimental/hello-world-assets-only/c3";
 import helloWorldWithDurableObjectAssetsTemplateExperimental from "templates-experimental/hello-world-durable-object-with-assets/c3";
 import helloWorldWithAssetsTemplateExperimental from "templates-experimental/hello-world-with-assets/c3";
 import honoTemplateExperimental from "templates-experimental/hono/c3";
 import nextTemplateExperimental from "templates-experimental/next/c3";
-import nuxtTemplateExperimental from "templates-experimental/nuxt/c3";
 import qwikTemplateExperimental from "templates-experimental/qwik/c3";
 import remixTemplateExperimental from "templates-experimental/remix/c3";
 import solidTemplateExperimental from "templates-experimental/solid/c3";
 import svelteTemplateExperimental from "templates-experimental/svelte/c3";
-import vueTemplateExperimental from "templates-experimental/vue/c3";
 import analogTemplate from "templates/analog/c3";
 import angularTemplate from "templates/angular/c3";
 import astroTemplate from "templates/astro/c3";
@@ -58,6 +53,15 @@ import { isInsideGitRepo } from "./git";
 import { validateProjectDirectory, validateTemplateUrl } from "./validators";
 import type { Option } from "@cloudflare/cli/interactive";
 import type { C3Args, C3Context, PackageJson } from "types";
+
+export type MultiPlatformTemplateConfig = {
+	displayName: string;
+	description?: string;
+	platformVariants: {
+		pages: TemplateConfig;
+		workers: TemplateConfig;
+	};
+};
 
 export type TemplateConfig = {
 	/**
@@ -164,23 +168,21 @@ const defaultSelectVariant = async (ctx: C3Context) => {
 	return ctx.args.lang;
 };
 
-export type TemplateMap = Record<string, TemplateConfig>;
+export type TemplateMap = Record<
+	string,
+	TemplateConfig | MultiPlatformTemplateConfig
+>;
 
 export function getFrameworkMap({ experimental = false }): TemplateMap {
 	if (experimental) {
 		return {
-			angular: angularTemplateExperimental,
 			astro: astroTemplateExperimental,
-			docusaurus: docusaurusTemplateExperimental,
-			gatsby: gatsbyTemplateExperimental,
 			hono: honoTemplateExperimental,
 			next: nextTemplateExperimental,
-			nuxt: nuxtTemplateExperimental,
 			qwik: qwikTemplateExperimental,
 			remix: remixTemplateExperimental,
 			solid: solidTemplateExperimental,
 			svelte: svelteTemplateExperimental,
-			vue: vueTemplateExperimental,
 		};
 	} else {
 		return {
@@ -301,28 +303,31 @@ export const createContext = async (
 	// Derive all correlated arguments first so we can skip some prompts
 	deriveCorrelatedArgs(args);
 
+	let linesPrinted = 0;
+
 	// Allows the users to go back to the previous step
 	// By moving the cursor up to a certain line and clearing the screen
-	const goBack = async (from: "category" | "type" | "framework" | "lang") => {
+	const goBack = async (
+		from: "category" | "type" | "framework" | "lang" | "platform",
+	) => {
 		const currentArgs = { ...args };
-		let linesPrinted = 0;
 
 		switch (from) {
 			case "category":
-				linesPrinted = 6;
 				args.projectName = undefined;
 				break;
 			case "type":
-				linesPrinted = 9;
 				args.category = undefined;
 				break;
 			case "framework":
-				linesPrinted = 9;
 				args.category = undefined;
 				break;
+			case "platform":
+				args.framework = undefined;
+				break;
 			case "lang":
-				linesPrinted = 12;
 				args.type = undefined;
+				args.framework = undefined;
 				break;
 		}
 
@@ -393,6 +398,7 @@ export const createContext = async (
 		options: categoryOptions,
 		defaultValue: prevArgs?.category ?? C3_DEFAULTS.category,
 	});
+	linesPrinted += 6;
 
 	if (category === BACK_VALUE) {
 		return goBack("category");
@@ -418,15 +424,45 @@ export const createContext = async (
 			options: frameworkOptions.concat(backOption),
 			defaultValue: prevArgs?.framework ?? C3_DEFAULTS.framework,
 		});
+		linesPrinted += 3;
 
 		if (framework === BACK_VALUE) {
 			return goBack("framework");
 		}
 
-		const frameworkConfig = frameworkMap[framework];
+		let frameworkConfig = frameworkMap[framework];
 
 		if (!frameworkConfig) {
 			throw new Error(`Unsupported framework: ${framework}`);
+		}
+
+		if ("platformVariants" in frameworkConfig) {
+			const platform = await processArgument(args, "platform", {
+				type: "select",
+				label: "platform",
+				question: "Select your deployment platform",
+				options: [
+					{
+						label: "Workers with Assets (BETA)",
+						value: "workers",
+						description:
+							"Take advantage of the full Developer Platform, including R2, Queues, Durable Objects and more.",
+					},
+					{
+						label: "Pages",
+						value: "pages",
+						description: "Great for simple websites and applications.",
+					},
+					backOption,
+				],
+				defaultValue: "workers",
+			});
+			linesPrinted += 3;
+			if ((platform as string) === BACK_VALUE) {
+				return goBack("platform");
+			}
+
+			frameworkConfig = frameworkConfig.platformVariants[platform];
 		}
 
 		template = {
@@ -464,6 +500,7 @@ export const createContext = async (
 			options: templateOptions.concat(backOption),
 			defaultValue: prevArgs?.type ?? C3_DEFAULTS.type,
 		});
+		linesPrinted += 3;
 
 		if (type === BACK_VALUE) {
 			return goBack("type");
@@ -512,6 +549,7 @@ export const createContext = async (
 					.concat(args.template ? [] : backOption),
 				defaultValue: C3_DEFAULTS.lang,
 			});
+			linesPrinted += 3;
 
 			if (lang === BACK_VALUE) {
 				return goBack("lang");
@@ -717,7 +755,7 @@ export const updatePackageName = async (ctx: C3Context) => {
 	// Update package.json with project name
 	const placeholderNames = ["<TBD>", "TBD", ""];
 	const pkgJsonPath = resolve(ctx.project.path, "package.json");
-	const pkgJson = readJSON(pkgJsonPath);
+	const pkgJson = readJSON(pkgJsonPath) as PackageJson;
 
 	if (!placeholderNames.includes(pkgJson.name)) {
 		return;
@@ -741,11 +779,11 @@ export const updatePackageScripts = async (ctx: C3Context) => {
 	s.start("Updating `package.json` scripts");
 
 	const pkgJsonPath = resolve(ctx.project.path, "package.json");
-	let pkgJson = readJSON(pkgJsonPath);
+	let pkgJson = readJSON(pkgJsonPath) as PackageJson;
 
 	// Run any transformers defined by the template
 	const transformed = await ctx.template.transformPackageJson(pkgJson, ctx);
-	pkgJson = deepmerge(pkgJson, transformed);
+	pkgJson = deepmerge(pkgJson, transformed as PackageJson);
 
 	writeJSON(pkgJsonPath, pkgJson);
 	s.stop(`${brandColor("updated")} ${dim("`package.json`")}`);

@@ -1,3 +1,4 @@
+import { existsSync } from "fs";
 import { join } from "path";
 import { readJSON, readToml } from "helpers/files";
 import { detectPackageManager } from "helpers/packageManagers";
@@ -6,7 +7,7 @@ import { sleep } from "helpers/sleep";
 import { fetch } from "undici";
 import { beforeAll, describe, expect } from "vitest";
 import { deleteWorker } from "../scripts/common";
-import { getFrameworkToTest } from "./frameworkToTest";
+import { getFrameworkToTest } from "./frameworks/framework-to-test";
 import {
 	isQuarantineMode,
 	kill,
@@ -177,6 +178,7 @@ describe
 				const name = testConfig.name ?? testConfig.template;
 				test({ experimental })(
 					name,
+					{ retry: 1, timeout: testConfig.timeout || TEST_TIMEOUT },
 					async ({ project, logStream }) => {
 						try {
 							const deployedUrl = await runCli(
@@ -195,20 +197,22 @@ describe
 							expect(wranglerPath).toExist();
 
 							const tomlPath = join(project.path, "wrangler.toml");
-							const jsonPath = join(project.path, "wrangler.json");
+							const jsoncPath = join(project.path, "wrangler.jsonc");
 
-							try {
-								expect(jsonPath).toExist();
-								const config = readJSON(jsonPath) as { main?: string };
+							if (existsSync(jsoncPath)) {
+								const config = readJSON(jsoncPath) as { main?: string };
 								if (config.main) {
 									expect(join(project.path, config.main)).toExist();
 								}
-							} catch (e) {
-								expect(tomlPath).toExist();
+							} else if (existsSync(tomlPath)) {
 								const config = readToml(tomlPath) as { main?: string };
 								if (config.main) {
 									expect(join(project.path, config.main)).toExist();
 								}
+							} else {
+								expect.fail(
+									`Expected at least one of "${jsoncPath}" or "${tomlPath}" to exist.`,
+								);
 							}
 
 							const { verifyDeploy, verifyTest } = testConfig;
@@ -227,7 +231,6 @@ describe
 							await deleteWorker(project.name);
 						}
 					},
-					{ retry: 1, timeout: testConfig.timeout || TEST_TIMEOUT },
 				);
 			});
 	});

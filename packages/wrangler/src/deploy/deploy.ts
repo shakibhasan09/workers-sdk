@@ -3,15 +3,14 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { URLSearchParams } from "node:url";
 import { cancel } from "@cloudflare/cli";
+import PQueue from "p-queue";
+import { Response } from "undici";
 import { syncAssets } from "../assets";
 import { fetchListResult, fetchResult } from "../cfetch";
 import { configFileName, formatConfigSnippet } from "../config";
 import { getBindings, provisionBindings } from "../deployment-bundle/bindings";
 import { bundleWorker } from "../deployment-bundle/bundle";
-import {
-	printBundleSize,
-	printOffendingDependencies,
-} from "../deployment-bundle/bundle-reporter";
+import { printBundleSize } from "../deployment-bundle/bundle-reporter";
 import { getBundleType } from "../deployment-bundle/bundle-type";
 import { createWorkerUploadForm } from "../deployment-bundle/create-worker-upload-form";
 import { logBuildOutput } from "../deployment-bundle/esbuild-plugins/log-build-output";
@@ -48,6 +47,7 @@ import {
 	maybeRetrieveFileSourceMap,
 } from "../sourcemap";
 import triggersDeploy from "../triggers/deploy";
+import { helpIfErrorIsSizeOrScriptStartup } from "../utils/friendly-validator-errors";
 import { printBindings } from "../utils/print-bindings";
 import { retryOnAPIFailure } from "../utils/retry";
 import {
@@ -75,6 +75,7 @@ import type { PostQueueBody, PostTypedConsumerBody } from "../queues/client";
 import type { LegacyAssetPaths } from "../sites";
 import type { RetrieveSourceMapFunction } from "../sourcemap";
 import type { ApiVersion, Percentage, VersionId } from "../versions/types";
+import type { FormData } from "undici";
 
 type Props = {
 	config: Config;
@@ -100,6 +101,7 @@ type Props = {
 	minify: boolean | undefined;
 	nodeCompat: boolean | undefined;
 	outDir: string | undefined;
+	outFile: string | undefined;
 	dryRun: boolean | undefined;
 	noBundle: boolean | undefined;
 	keepVars: boolean | undefined;
@@ -134,47 +136,6 @@ export type CustomDomainChangeset = {
 	conflicting: ConflictingCustomDomain[];
 };
 
-export function sleep(ms: number) {
-	return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-const scriptStartupErrorRegex = /startup/i;
-
-function errIsScriptSize(err: unknown): err is { code: 10027 } {
-	if (!err) {
-		return false;
-	}
-
-	// 10027 = workers.api.error.script_too_large
-	if ((err as { code: number }).code === 10027) {
-		return true;
-	}
-
-	return false;
-}
-
-function errIsStartupErr(err: unknown): err is ParseError & { code: 10021 } {
-	if (!err) {
-		return false;
-	}
-
-	// 10021 = validation error
-	// no explicit error code for more granular errors than "invalid script"
-	// but the error will contain a string error message directly from the
-	// validator.
-	// the error always SHOULD look like "Script startup exceeded CPU limit."
-	// (or the less likely "Script startup exceeded memory limits.")
-	if (
-		(err as { code: number }).code === 10021 &&
-		err instanceof ParseError &&
-		scriptStartupErrorRegex.test(err.notes[0]?.text)
-	) {
-		return true;
-	}
-
-	return false;
-}
-
 export const validateRoutes = (routes: Route[], assets?: AssetsOptions) => {
 	const invalidRoutes: Record<string, string[]> = {};
 	const mountedAssetRoutes: string[] = [];
@@ -196,7 +157,7 @@ export const validateRoutes = (routes: Route[], assets?: AssetsOptions) => {
 		} else if (
 			// If we have Assets but we're not always hitting the Worker then validate
 			assets?.directory !== undefined &&
-			assets.assetConfig.run_worker_first !== true
+			assets.routerConfig.invoke_user_worker_ahead_of_assets !== true
 		) {
 			const pattern = typeof route === "string" ? route : route.pattern;
 			const components = pattern.split("/");
@@ -230,7 +191,7 @@ export const validateRoutes = (routes: Route[], assets?: AssetsOptions) => {
 					return `  • ${route} (Will match assets: ${assetPath})`;
 				})
 				.join("\n")}` +
-				(assets?.routingConfig.has_user_worker
+				(assets?.routerConfig.has_user_worker
 					? "\n\nRequests not matching an asset will be forwarded to the Worker's code."
 					: "")
 		);
@@ -746,8 +707,10 @@ See https://developers.cloudflare.com/workers/platform/compatibility-dates for m
 				props.assetsOptions && assetsJwt
 					? {
 							jwt: assetsJwt,
-							routingConfig: props.assetsOptions.routingConfig,
+							routerConfig: props.assetsOptions.routerConfig,
 							assetConfig: props.assetsOptions.assetConfig,
+							_redirects: props.assetsOptions._redirects,
+							_headers: props.assetsOptions._headers,
 						}
 					: undefined,
 			observability: config.observability,
@@ -795,7 +758,10 @@ See https://developers.cloudflare.com/workers/platform/compatibility-dates for m
 			migrations === undefined &&
 			!config.first_party_worker;
 
+		let workerBundle: FormData;
+
 		if (props.dryRun) {
+			workerBundle = createWorkerUploadForm(worker);
 			printBindings({ ...withoutStaticAssets, vars: maskedVars });
 		} else {
 			assert(accountId, "Missing accountId");
@@ -809,6 +775,8 @@ See https://developers.cloudflare.com/workers/platform/compatibility-dates for m
 					props.config
 				);
 			}
+			workerBundle = createWorkerUploadForm(worker);
+
 			await ensureQueuesExistByConfig(config);
 			let bindingsPrinted = false;
 
@@ -831,7 +799,7 @@ See https://developers.cloudflare.com/workers/platform/compatibility-dates for m
 							`/accounts/${accountId}/workers/scripts/${scriptName}/versions`,
 							{
 								method: "POST",
-								body: createWorkerUploadForm(worker),
+								body: workerBundle,
 								headers: await getMetricsUsageHeaders(config.send_metrics),
 							}
 						)
@@ -873,7 +841,7 @@ See https://developers.cloudflare.com/workers/platform/compatibility-dates for m
 							workerUrl,
 							{
 								method: "PUT",
-								body: createWorkerUploadForm(worker),
+								body: workerBundle,
 								headers: await getMetricsUsageHeaders(config.send_metrics),
 							},
 							new URLSearchParams({
@@ -918,7 +886,12 @@ See https://developers.cloudflare.com/workers/platform/compatibility-dates for m
 				if (!bindingsPrinted) {
 					printBindings({ ...withoutStaticAssets, vars: maskedVars });
 				}
-				helpIfErrorIsSizeOrScriptStartup(err, dependencies);
+				await helpIfErrorIsSizeOrScriptStartup(
+					err,
+					dependencies,
+					workerBundle,
+					props.projectRoot
+				);
 
 				// Apply source mapping to validation startup errors if possible
 				if (
@@ -967,6 +940,15 @@ See https://developers.cloudflare.com/workers/platform/compatibility-dates for m
 				throw err;
 			}
 		}
+		if (props.outFile) {
+			// we're using a custom output file,
+			// so let's first ensure it's parent directory exists
+			mkdirSync(path.dirname(props.outFile), { recursive: true });
+
+			const serializedFormData = await new Response(workerBundle).arrayBuffer();
+
+			writeFileSync(props.outFile, Buffer.from(serializedFormData));
+		}
 	} finally {
 		if (typeof destination !== "string") {
 			// this means we're using a temp dir,
@@ -1010,27 +992,6 @@ function deployWfpUserWorker(
 	// Will go under the "Uploaded" text
 	logger.log("  Dispatch Namespace:", dispatchNamespace);
 	logger.log("Current Version ID:", versionId);
-}
-
-function helpIfErrorIsSizeOrScriptStartup(
-	err: unknown,
-	dependencies: { [path: string]: { bytesInOutput: number } }
-) {
-	if (errIsScriptSize(err)) {
-		printOffendingDependencies(dependencies);
-	} else if (errIsStartupErr(err)) {
-		const youFailed =
-			"Your Worker failed validation because it exceeded startup limits.";
-		const heresWhy =
-			"To ensure fast responses, we place constraints on Worker startup -- like how much CPU it can use, or how long it can take.";
-		const heresTheProblem =
-			"Your Worker failed validation, which means it hit one of these startup limits.";
-		const heresTheSolution =
-			"Try reducing the amount of work done during startup (outside the event handler), either by removing code or relocating it inside the event handler.";
-		logger.warn(
-			[youFailed, heresWhy, heresTheProblem, heresTheSolution].join("\n")
-		);
-	}
 }
 
 export function formatTime(duration: number) {
@@ -1110,43 +1071,59 @@ async function publishRoutesFallback(
 
 	const deployedRoutes: string[] = [];
 
+	const queue = new PQueue({ concurrency: 10 });
+	const queuePromises: Array<Promise<void>> = [];
+	const zoneIdCache = new Map();
+
 	// Collect the routes (and their zones) that will be deployed.
 	const activeZones = new Map<string, string>();
 	const routesToDeploy = new Map<string, string>();
 	for (const route of routes) {
-		const zone = await getZoneForRoute({ route, accountId });
-		if (zone) {
-			activeZones.set(zone.id, zone.host);
-			routesToDeploy.set(
-				typeof route === "string" ? route : route.pattern,
-				zone.id
-			);
-		}
+		queuePromises.push(
+			queue.add(async () => {
+				const zone = await getZoneForRoute({ route, accountId }, zoneIdCache);
+				if (zone) {
+					activeZones.set(zone.id, zone.host);
+					routesToDeploy.set(
+						typeof route === "string" ? route : route.pattern,
+						zone.id
+					);
+				}
+			})
+		);
 	}
+	await Promise.all(queuePromises.splice(0, queuePromises.length));
 
 	// Collect the routes that are already deployed.
 	const allRoutes = new Map<string, string>();
 	const alreadyDeployedRoutes = new Set<string>();
 	for (const [zone, host] of activeZones) {
-		try {
-			for (const { pattern, script } of await fetchListResult<{
-				pattern: string;
-				script: string;
-			}>(`/zones/${zone}/workers/routes`)) {
-				allRoutes.set(pattern, script);
-				if (script === scriptName) {
-					alreadyDeployedRoutes.add(pattern);
+		queuePromises.push(
+			queue.add(async () => {
+				try {
+					for (const { pattern, script } of await fetchListResult<{
+						pattern: string;
+						script: string;
+					}>(`/zones/${zone}/workers/routes`)) {
+						allRoutes.set(pattern, script);
+						if (script === scriptName) {
+							alreadyDeployedRoutes.add(pattern);
+						}
+					}
+				} catch (e) {
+					if (isAuthenticationError(e)) {
+						e.notes.push({
+							text: `This could be because the API token being used does not have permission to access the zone "${host}" (${zone}).`,
+						});
+					}
+					throw e;
 				}
-			}
-		} catch (e) {
-			if (isAuthenticationError(e)) {
-				e.notes.push({
-					text: `This could be because the API token being used does not have permission to access the zone "${host}" (${zone}).`,
-				});
-			}
-			throw e;
-		}
+			})
+		);
 	}
+	// using Promise.all() here instead of queue.onIdle() to ensure
+	// we actually throw errors that occur within queued promises.
+	await Promise.all(queuePromises);
 
 	// Deploy each route that is not already deployed.
 	for (const [routePattern, zoneId] of routesToDeploy.entries()) {

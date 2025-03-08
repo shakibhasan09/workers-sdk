@@ -1,5 +1,151 @@
 # @cloudflare/vitest-pool-workers
 
+## 0.7.7
+
+### Patch Changes
+
+- Updated dependencies [[`7b6b0c2`](https://github.com/cloudflare/workers-sdk/commit/7b6b0c213c6e490934cca1943e39268f574281e4)]:
+  - wrangler@3.114.0
+
+## 0.7.6
+
+### Patch Changes
+
+- [#8338](https://github.com/cloudflare/workers-sdk/pull/8338) [`2d40989`](https://github.com/cloudflare/workers-sdk/commit/2d409892f1cf08f07f84d25dcab023bc20ada374) Thanks [@GregBrimble](https://github.com/GregBrimble)! - feat: Upload \_headers and \_redirects if present with Workers Assets as part of `wrangler deploy` and `wrangler versions upload`.
+
+- [#8288](https://github.com/cloudflare/workers-sdk/pull/8288) [`cf14e17`](https://github.com/cloudflare/workers-sdk/commit/cf14e17d40b9e51475ba4d9ee6b4e3ef5ae5e841) Thanks [@CarmenPopoviciu](https://github.com/CarmenPopoviciu)! - feat: Add assets Proxy Worker skeleton in miniflare
+
+  This commit implements a very basic Proxy Worker skeleton, and wires it in the "pipeline" miniflare creates for assets. This Worker will be incrementally worked on, but for now, the current implementation will forward all incoming requests to the Router Worker, thus leaving the current assets behaviour in local dev, the same.
+
+  This is an experimental feature available under the `--x-assets-rpc` flag: `wrangler dev --x-assets-rpc`.
+
+- Updated dependencies [[`2d40989`](https://github.com/cloudflare/workers-sdk/commit/2d409892f1cf08f07f84d25dcab023bc20ada374), [`da568e5`](https://github.com/cloudflare/workers-sdk/commit/da568e5a94bf270cfdcd80123d8161fc5437dcd2), [`cf14e17`](https://github.com/cloudflare/workers-sdk/commit/cf14e17d40b9e51475ba4d9ee6b4e3ef5ae5e841), [`af9a57a`](https://github.com/cloudflare/workers-sdk/commit/af9a57a327d9283ebf62ef6dc074f2005a57b669), [`fbba583`](https://github.com/cloudflare/workers-sdk/commit/fbba583df9340a011fda538e4c9c6480129be1fd), [`bca1fb5`](https://github.com/cloudflare/workers-sdk/commit/bca1fb5510f79820d558be839f459de3d50505e0), [`79c7810`](https://github.com/cloudflare/workers-sdk/commit/79c781076cc79e512753b65644c027138aa1d878)]:
+  - wrangler@3.113.0
+  - miniflare@3.20250224.0
+
+## 0.7.5
+
+### Patch Changes
+
+- [#8173](https://github.com/cloudflare/workers-sdk/pull/8173) [`a9c0159`](https://github.com/cloudflare/workers-sdk/commit/a9c0159f85ab69e9f071d0c56f5658d92d4f8a69) Thanks [@edmundhung](https://github.com/edmundhung)! - improve error message with isolated storage
+
+- [#8199](https://github.com/cloudflare/workers-sdk/pull/8199) [`60d2bc6`](https://github.com/cloudflare/workers-sdk/commit/60d2bc61ad62fc023e356b7c4e5a72cbea9f56fb) Thanks [@edmundhung](https://github.com/edmundhung)! - Added step-through debugging support with Vitest.
+
+  To start debugging, run Vitest with the following command and attach a debugger to port 9229:
+
+  ```sh
+  vitest --inspect=9229 --no-file-parallelism
+  ```
+
+  For more details, check out our [Vitest Debugging guide](https://developers.cloudflare.com/workers/testing/vitest-integration/debugging).
+
+- Updated dependencies [[`fce642d`](https://github.com/cloudflare/workers-sdk/commit/fce642d59264b1b6e7df8a6c9a015519b7574637), [`2cad136`](https://github.com/cloudflare/workers-sdk/commit/2cad136e99c48c2bf64c0010a8ecc7465be79b03), [`f59d95b`](https://github.com/cloudflare/workers-sdk/commit/f59d95b6f48ee2ea902202af2778a1598596ebbd), [`a4909cb`](https://github.com/cloudflare/workers-sdk/commit/a4909cbe552eae72b901cd78bf1f814f818085a0)]:
+  - miniflare@3.20250214.2
+  - wrangler@3.112.0
+
+## 0.7.4
+
+### Patch Changes
+
+- [#8254](https://github.com/cloudflare/workers-sdk/pull/8254) [`2b92a65`](https://github.com/cloudflare/workers-sdk/commit/2b92a65fe6ec500c16c20c46bf91c2d5f3e4ceba) Thanks [@edmundhung](https://github.com/edmundhung)! - fix: responses from `fetchMock` should have immutable headers
+
+- Updated dependencies [[`36ef9c6`](https://github.com/cloudflare/workers-sdk/commit/36ef9c6209c937570711ff407fd29de6fb7cf267), [`1cb2d34`](https://github.com/cloudflare/workers-sdk/commit/1cb2d3418b21b4d54d1c8debbfc91a5efc8f5708), [`36ef9c6`](https://github.com/cloudflare/workers-sdk/commit/36ef9c6209c937570711ff407fd29de6fb7cf267)]:
+  - wrangler@3.111.0
+
+## 0.7.3
+
+### Patch Changes
+
+- [#8182](https://github.com/cloudflare/workers-sdk/pull/8182) [`085a37a`](https://github.com/cloudflare/workers-sdk/commit/085a37abe68d4b14e2e9e5dbe00a6437d5b9c566) Thanks [@edmundhung](https://github.com/edmundhung)! - fix mock modules not re-evaluated in watch mode
+
+- Updated dependencies [[`968c3d9`](https://github.com/cloudflare/workers-sdk/commit/968c3d9c068fa895b30f0198d7c8873a00709e62), [`a9a4c33`](https://github.com/cloudflare/workers-sdk/commit/a9a4c33143b9f58673ac0cdd251957997275fa10), [`6cae13a`](https://github.com/cloudflare/workers-sdk/commit/6cae13aa5f338cee18ec2e43a5dadda0c7d8dc2e), [`6dd1e23`](https://github.com/cloudflare/workers-sdk/commit/6dd1e2300ec393e210bfdb6d0a7cf4ade17b6ad4)]:
+  - wrangler@3.110.0
+  - miniflare@3.20250214.1
+
+## 0.7.2
+
+### Patch Changes
+
+- Updated dependencies [[`eb46f98`](https://github.com/cloudflare/workers-sdk/commit/eb46f987ccd215e95a9d56c60841c7c996931b2f)]:
+  - wrangler@3.109.3
+
+## 0.7.1
+
+### Patch Changes
+
+- [#7084](https://github.com/cloudflare/workers-sdk/pull/7084) [`82a8937`](https://github.com/cloudflare/workers-sdk/commit/82a89371250a1ec3e56fa5a518c685d362bde0ad) Thanks [@penalosa](https://github.com/penalosa)! - Support scoped names (e.g. `@scoped/durable-objects`) when using `runInDurableObject()`
+
+- [#8179](https://github.com/cloudflare/workers-sdk/pull/8179) [`b10483c`](https://github.com/cloudflare/workers-sdk/commit/b10483cca7d58257afd6e97ee66551d2279b8168) Thanks [@edmundhung](https://github.com/edmundhung)! - fix: support running in directories that contain spaces
+
+## 0.7.0
+
+### Minor Changes
+
+- [#7923](https://github.com/cloudflare/workers-sdk/pull/7923) [`aaa9cca`](https://github.com/cloudflare/workers-sdk/commit/aaa9cca4deeaab3155dcedeca0177339b24246af) Thanks [@penalosa](https://github.com/penalosa)! - Support Vitest v3. While this drops testing for Vitest v2, we expect Vitest v2 will continue to work as well.
+
+### Patch Changes
+
+- Updated dependencies [[`5e06177`](https://github.com/cloudflare/workers-sdk/commit/5e06177861b29aa9b114f9ecb50093190af94f4b), [`cc853cf`](https://github.com/cloudflare/workers-sdk/commit/cc853cf0dcefc35c9d9022b9a1641d2d77c19da8), [`efd7f97`](https://github.com/cloudflare/workers-sdk/commit/efd7f9764199ef67dff14155bd3dd249c4dff5c7)]:
+  - miniflare@3.20250214.0
+  - wrangler@3.109.2
+
+## 0.6.16
+
+### Patch Changes
+
+- Updated dependencies [[`28b1dc7`](https://github.com/cloudflare/workers-sdk/commit/28b1dc7c6f213de336d58ce93308575de8f42f06)]:
+  - wrangler@3.109.1
+
+## 0.6.15
+
+### Patch Changes
+
+- Updated dependencies [[`3fb801f`](https://github.com/cloudflare/workers-sdk/commit/3fb801f734632c165685799cb1b752c4dad0445a), [`fff677e`](https://github.com/cloudflare/workers-sdk/commit/fff677e35f67c28275262c1d19f7eb4d6c6ab071), [`3fb801f`](https://github.com/cloudflare/workers-sdk/commit/3fb801f734632c165685799cb1b752c4dad0445a), [`542c6ea`](https://github.com/cloudflare/workers-sdk/commit/542c6ead5d7c7e64a103abd5572ec7b8aea96c90), [`3fb801f`](https://github.com/cloudflare/workers-sdk/commit/3fb801f734632c165685799cb1b752c4dad0445a), [`4db1fb5`](https://github.com/cloudflare/workers-sdk/commit/4db1fb5696412c6666589a778184e10386294d71), [`542c6ea`](https://github.com/cloudflare/workers-sdk/commit/542c6ead5d7c7e64a103abd5572ec7b8aea96c90), [`1bc60d7`](https://github.com/cloudflare/workers-sdk/commit/1bc60d761ebf67a64ac248e3e2c826407bc26252), [`1aa2a91`](https://github.com/cloudflare/workers-sdk/commit/1aa2a9198578f8eb106f19c8475a63ff4eef26aa), [`35710e5`](https://github.com/cloudflare/workers-sdk/commit/35710e590f20e5c83fb25138ba4ae7890b780a08)]:
+  - wrangler@3.109.0
+  - miniflare@3.20250204.1
+
+## 0.6.14
+
+### Patch Changes
+
+- [#7810](https://github.com/cloudflare/workers-sdk/pull/7810) [`ac4f30b`](https://github.com/cloudflare/workers-sdk/commit/ac4f30b0532f2559ecf1739ba12aa5155cd0a62e) Thanks [@edmundhung](https://github.com/edmundhung)! - Added [Vite dependency pre-bundling](https://vite.dev/guide/dep-pre-bundling) support. If you encounter module resolution issues—such as: `Error: Cannot use require() to import an ES Module` or `Error: No such module`—you can now bundle these dependencies using the [deps.optimizer](https://vitest.dev/config/#deps-optimizer) option:
+
+  ```tsx
+  import { defineWorkersConfig } from "@cloudflare/vitest-pool-workers/config";
+
+  export default defineWorkersConfig({
+  	test: {
+  		deps: {
+  			optimizer: {
+  				ssr: {
+  					enabled: true,
+  					include: ["your-package-name"],
+  				},
+  			},
+  		},
+  		poolOptions: {
+  			workers: {
+  				// ...
+  			},
+  		},
+  	},
+  });
+  ```
+
+  Fixed #6591, #6581, #6405.
+
+- Updated dependencies [[`a025ad2`](https://github.com/cloudflare/workers-sdk/commit/a025ad2ecb086cb4bcee6b9dfd8cf06eb2102ade)]:
+  - wrangler@3.108.1
+  - miniflare@3.20250204.0
+
+## 0.6.13
+
+### Patch Changes
+
+- Updated dependencies [[`b1966df`](https://github.com/cloudflare/workers-sdk/commit/b1966dfe57713f3ddcaa781d0551a1088a22424e), [`c80dbd8`](https://github.com/cloudflare/workers-sdk/commit/c80dbd8d5e53a081cf600e250f1ddda860be1a12), [`1f80d69`](https://github.com/cloudflare/workers-sdk/commit/1f80d69f566d240428ddec0c7b62a23c6f5af3c1), [`88514c8`](https://github.com/cloudflare/workers-sdk/commit/88514c82d447903e48d9f782446a6b502e553631), [`9d08af8`](https://github.com/cloudflare/workers-sdk/commit/9d08af81893df499d914b890d784a9554ebf9507), [`6abe69c`](https://github.com/cloudflare/workers-sdk/commit/6abe69c3fe1fb2e762153a3094119ed83038a50b), [`0c0374c`](https://github.com/cloudflare/workers-sdk/commit/0c0374cce3908a47f7459ba4810855c1ce124349), [`b2dca9a`](https://github.com/cloudflare/workers-sdk/commit/b2dca9a2fb885cb4da87a959fefa035c0974d15c), [`6abe69c`](https://github.com/cloudflare/workers-sdk/commit/6abe69c3fe1fb2e762153a3094119ed83038a50b), [`c412a31`](https://github.com/cloudflare/workers-sdk/commit/c412a31985f3c622e5e3cf366699f9e6977184a2), [`60310cd`](https://github.com/cloudflare/workers-sdk/commit/60310cd796468e96571a4d0520f92af54da62630), [`71fd250`](https://github.com/cloudflare/workers-sdk/commit/71fd250f67a02feab7a2f66623ac8bd52b7f7f21)]:
+  - wrangler@3.108.0
+  - miniflare@3.20250204.0
+
 ## 0.6.12
 
 ### Patch Changes
@@ -856,16 +1002,16 @@
   import { defineWorkersConfig } from "@cloudflare/vitest-pool-workers/config";
 
   export default defineWorkersConfig({
-    test: {
-      poolOptions: {
-        workers: {
-          wrangler: {
-            configPath: "./wrangler.toml",
-            environment: "production",
-          },
-        },
-      },
-    },
+  	test: {
+  		poolOptions: {
+  			workers: {
+  				wrangler: {
+  					configPath: "./wrangler.toml",
+  					environment: "production",
+  				},
+  			},
+  		},
+  	},
   });
   ```
 

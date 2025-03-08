@@ -18,6 +18,8 @@ type Data = {
 	metalId?: number;
 	// double4 - Colo tier (e.g. tier 1, tier 2, tier 3)
 	coloTier?: number;
+	// double5 - Response status code
+	status?: number;
 
 	// -- Blobs --
 	// blob1 - Hostname of the request
@@ -34,6 +36,8 @@ type Data = {
 	version?: string;
 	// blob7 - Region of the colo (e.g. WEUR)
 	coloRegion?: string;
+	// blob8 - The cache status of the request
+	cacheStatus?: string;
 };
 
 export class Analytics {
@@ -66,6 +70,7 @@ export class Analytics {
 				this.data.coloId ?? -1, // double2
 				this.data.metalId ?? -1, // double3
 				this.data.coloTier ?? -1, // double4
+				this.data.status ?? -1, // double5
 			],
 			blobs: [
 				this.data.hostname?.substring(0, 256), // blob1 - trim to 256 bytes
@@ -75,6 +80,7 @@ export class Analytics {
 				this.data.error?.substring(0, 256), // blob5 - trim to 256 bytes
 				this.data.version, // blob6
 				this.data.coloRegion, // blob7
+				this.data.cacheStatus, // blob8
 			],
 		});
 	}

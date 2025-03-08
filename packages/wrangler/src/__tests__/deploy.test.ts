@@ -65,6 +65,14 @@ import type { FormData } from "undici";
 import type { Mock } from "vitest";
 
 vi.mock("command-exists");
+vi.mock("../check/commands", async (importOriginal) => {
+	return {
+		...(await importOriginal()),
+		analyseBundle() {
+			return `{}`;
+		},
+	};
+});
 
 describe("deploy", () => {
 	mockAccountId();
@@ -4064,7 +4072,7 @@ addEventListener('fetch', event => {});`
 		`);
 			expect(std.warn).toMatchInlineSnapshot(`""`);
 			expect(std.err).toMatchInlineSnapshot(`""`);
-		});
+		}, 30_000);
 
 		it("should error if the asset key is over 512 characters", async () => {
 			const longFilePathAsset = {
@@ -5016,9 +5024,18 @@ addEventListener('fetch', event => {});`
 		});
 
 		it("should error if run_worker_first is true and no user Worker is provided", async () => {
+			const assets = [
+				{ filePath: ".assetsignore", content: "*.bak\nsub-dir" },
+				{ filePath: "file-1.txt", content: "Content of file-1" },
+				{ filePath: "file-2.bak", content: "Content of file-2" },
+				{ filePath: "file-3.txt", content: "Content of file-3" },
+				{ filePath: "sub-dir/file-4.bak", content: "Content of file-4" },
+				{ filePath: "sub-dir/file-5.txt", content: "Content of file-5" },
+			];
+			writeAssets(assets, "assets");
 			writeWranglerConfig({
 				assets: {
-					directory: "xyz",
+					directory: "assets",
 					run_worker_first: true,
 				},
 			});
@@ -5028,6 +5045,59 @@ addEventListener('fetch', event => {});`
 				[Error: Cannot set run_worker_first=true without a Worker script.
 				Please remove run_worker_first from your configuration file, or provide a Worker script in your configuration file (\`main\`).]
 			`);
+		});
+
+		it("should attach an 'application/null' content-type header when uploading files with an unknown extension", async () => {
+			const assets = [{ filePath: "foobar.greg", content: "something-binary" }];
+			writeAssets(assets);
+			writeWranglerConfig({
+				assets: { directory: "assets" },
+			});
+
+			const manifestBodies: AssetManifest[] = [];
+			const mockBuckets = [["80e40c1f2422528cb2fba3f9389ce315"]];
+			await mockAUSRequest(manifestBodies, mockBuckets, "<<aus-token>>");
+			const uploadBodies: FormData[] = [];
+			const uploadAuthHeaders: (string | null)[] = [];
+			const uploadContentTypeHeaders: (string | null)[] = [];
+			await mockAssetUploadRequest(
+				mockBuckets.length,
+				uploadBodies,
+				uploadAuthHeaders,
+				uploadContentTypeHeaders
+			);
+			mockSubDomainRequest();
+			mockUploadWorkerRequest({
+				expectedAssets: {
+					jwt: "<<aus-completion-token>>",
+					config: {},
+				},
+				expectedType: "none",
+			});
+			await runWrangler("deploy");
+			expect(manifestBodies.length).toBe(1);
+			expect(manifestBodies[0]).toEqual({
+				manifest: {
+					"/foobar.greg": {
+						hash: "80e40c1f2422528cb2fba3f9389ce315",
+						size: 16,
+					},
+				},
+			});
+			const flatBodies = Object.fromEntries(
+				uploadBodies.flatMap((b) => [...b.entries()])
+			);
+			await expect(
+				flatBodies["80e40c1f2422528cb2fba3f9389ce315"]
+			).toBeAFileWhichMatches(
+				new File(
+					["c29tZXRoaW5nLWJpbmFyeQ=="],
+					"80e40c1f2422528cb2fba3f9389ce315",
+					{
+						type: "application/null",
+					}
+				)
+			);
 		});
 
 		it("should be able to upload files with special characters in filepaths", async () => {
@@ -5159,6 +5229,8 @@ addEventListener('fetch', event => {});`
 		it("should ignore assets that match patterns in an .assetsignore file in the root of the assets directory", async () => {
 			const assets = [
 				{ filePath: ".assetsignore", content: "*.bak\nsub-dir" },
+				{ filePath: "_redirects", content: "/foo /bar" },
+				{ filePath: "_headers", content: "/some-path\nX-Header: Custom-Value" },
 				{ filePath: "file-1.txt", content: "Content of file-1" },
 				{ filePath: "file-2.bak", content: "Content of file-2" },
 				{ filePath: "file-3.txt", content: "Content of file-3" },
@@ -5341,6 +5413,45 @@ addEventListener('fetch', event => {});`
 				}
 			`);
 			expect(std.warn).toMatchInlineSnapshot(`""`);
+		});
+
+		it("should upload _redirects and _headers", async () => {
+			const redirectsContent = "/foo /bar";
+			const headersContent = "/some-path\nX-Header: Custom-Value";
+			const assets = [
+				{ filePath: "_redirects", content: redirectsContent },
+				{ filePath: "_headers", content: headersContent },
+				{ filePath: "index.html", content: "<html></html>" },
+			];
+			writeAssets(assets);
+			writeWranglerConfig({
+				assets: { directory: "assets" },
+			});
+			const bodies: AssetManifest[] = [];
+			await mockAUSRequest(bodies);
+			mockSubDomainRequest();
+			mockUploadWorkerRequest({
+				expectedAssets: {
+					jwt: "<<aus-completion-token>>",
+					config: {
+						_redirects: redirectsContent,
+						_headers: headersContent,
+					},
+				},
+				expectedType: "none",
+			});
+			await runWrangler("deploy");
+			expect(bodies.length).toBe(1);
+			expect(bodies[0]).toMatchInlineSnapshot(`
+				Object {
+				  "manifest": Object {
+				    "/index.html": Object {
+				      "hash": "4752155c2c0c0320b40bca1d83e8380a",
+				      "size": 13,
+				    },
+				  },
+				}
+			`);
 		});
 
 		it("should resolve assets directory relative to cwd if using cli", async () => {
@@ -10136,7 +10247,7 @@ addEventListener('fetch', event => {});`
 					)
 				)
 			).resolves.toMatchInlineSnapshot(`
-				"X [ERROR] Unexpected external import of \\"node:net\\", \\"node:stream\\", \\"node:timers/promises\\", and \\"node:tty\\".
+				"X [ERROR] Unexpected external import of \\"node:events\\", \\"node:net\\", \\"node:perf_hooks\\", \\"node:stream\\", and \\"node:tty\\".
 				Your worker has no default export, which means it is assumed to be a Service Worker format Worker.
 				Did you mean to create a ES Module format Worker?
 				If so, try adding \`export default { ... }\` in your entry-point.
@@ -10490,6 +10601,426 @@ export default{
 				  "out": "Total Upload: xx KiB / gzip: xx KiB
 				Worker Startup Time: 100 ms
 				No bindings found.
+				Uploaded test-name (TIMINGS)
+				Deployed test-name triggers (TIMINGS)
+				  https://test-name.test-sub-domain.workers.dev
+				Current Version ID: Galaxy-Class",
+				  "warn": "",
+				}
+			`);
+		});
+	});
+
+	describe("--outfile", () => {
+		it("should generate worker bundle at --outfile if specified", async () => {
+			writeWranglerConfig();
+			writeWorkerSource();
+			mockSubDomainRequest();
+			mockUploadWorkerRequest();
+			await runWrangler("deploy index.js --outfile some-dir/worker.bundle");
+			expect(fs.existsSync("some-dir/worker.bundle")).toBe(true);
+			expect(std).toMatchInlineSnapshot(`
+				Object {
+				  "debug": "",
+				  "err": "",
+				  "info": "",
+				  "out": "Total Upload: xx KiB / gzip: xx KiB
+				Worker Startup Time: 100 ms
+				No bindings found.
+				Uploaded test-name (TIMINGS)
+				Deployed test-name triggers (TIMINGS)
+				  https://test-name.test-sub-domain.workers.dev
+				Current Version ID: Galaxy-Class",
+				  "warn": "",
+				}
+			`);
+		});
+
+		it("should include any module imports related assets in the worker bundle", async () => {
+			writeWranglerConfig();
+			fs.writeFileSync(
+				"./index.js",
+				`
+import txt from './textfile.txt';
+import hello from './hello.wasm';
+export default{
+  async fetch(){
+		const module = await WebAssembly.instantiate(hello);
+    return new Response(txt + module.exports.hello);
+  }
+}
+`
+			);
+			fs.writeFileSync("./textfile.txt", "Hello, World!");
+			fs.writeFileSync("./hello.wasm", "Hello wasm World!");
+			mockSubDomainRequest();
+			mockUploadWorkerRequest({
+				expectedModules: {
+					"./0a0a9f2a6772942557ab5355d76af442f8f65e01-textfile.txt":
+						"Hello, World!",
+					"./d025a03cd31e98e96fb5bd5bce87f9bca4e8ce2c-hello.wasm":
+						"Hello wasm World!",
+				},
+			});
+			await runWrangler("deploy index.js --outfile some-dir/worker.bundle");
+
+			expect(fs.existsSync("some-dir/worker.bundle")).toBe(true);
+			expect(
+				fs
+					.readFileSync("some-dir/worker.bundle", "utf8")
+					.replace(
+						/------formdata-undici-0.[0-9]*/g,
+						"------formdata-undici-0.test"
+					)
+					.replace(/wrangler_(.+?)_default/g, "wrangler_default")
+			).toMatchInlineSnapshot(`
+				"------formdata-undici-0.test
+				Content-Disposition: form-data; name=\\"metadata\\"
+
+				{\\"main_module\\":\\"index.js\\",\\"bindings\\":[],\\"compatibility_date\\":\\"2022-01-12\\",\\"compatibility_flags\\":[]}
+				------formdata-undici-0.test
+				Content-Disposition: form-data; name=\\"index.js\\"; filename=\\"index.js\\"
+				Content-Type: application/javascript+module
+
+				// index.js
+				import txt from \\"./0a0a9f2a6772942557ab5355d76af442f8f65e01-textfile.txt\\";
+				import hello from \\"./d025a03cd31e98e96fb5bd5bce87f9bca4e8ce2c-hello.wasm\\";
+				var wrangler_default = {
+				  async fetch() {
+				    const module = await WebAssembly.instantiate(hello);
+				    return new Response(txt + module.exports.hello);
+				  }
+				};
+				export {
+				  wrangler_default as default
+				};
+				//# sourceMappingURL=index.js.map
+
+				------formdata-undici-0.test
+				Content-Disposition: form-data; name=\\"./0a0a9f2a6772942557ab5355d76af442f8f65e01-textfile.txt\\"; filename=\\"./0a0a9f2a6772942557ab5355d76af442f8f65e01-textfile.txt\\"
+				Content-Type: text/plain
+
+				Hello, World!
+				------formdata-undici-0.test
+				Content-Disposition: form-data; name=\\"./d025a03cd31e98e96fb5bd5bce87f9bca4e8ce2c-hello.wasm\\"; filename=\\"./d025a03cd31e98e96fb5bd5bce87f9bca4e8ce2c-hello.wasm\\"
+				Content-Type: application/wasm
+
+				Hello wasm World!
+				------formdata-undici-0.test--"
+			`);
+
+			expect(std).toMatchInlineSnapshot(`
+				Object {
+				  "debug": "",
+				  "err": "",
+				  "info": "",
+				  "out": "Total Upload: xx KiB / gzip: xx KiB
+				Worker Startup Time: 100 ms
+				No bindings found.
+				Uploaded test-name (TIMINGS)
+				Deployed test-name triggers (TIMINGS)
+				  https://test-name.test-sub-domain.workers.dev
+				Current Version ID: Galaxy-Class",
+				  "warn": "",
+				}
+			`);
+		});
+
+		it("should include bindings in the worker bundle", async () => {
+			writeWranglerConfig({
+				kv_namespaces: [{ binding: "KV", id: "kv-namespace-id" }],
+			});
+			fs.writeFileSync(
+				"./index.js",
+				`
+import txt from './textfile.txt';
+import hello from './hello.wasm';
+export default{
+  async fetch(){
+		const module = await WebAssembly.instantiate(hello);
+    return new Response(txt + module.exports.hello);
+  }
+}
+`
+			);
+			fs.writeFileSync("./textfile.txt", "Hello, World!");
+			fs.writeFileSync("./hello.wasm", "Hello wasm World!");
+			mockSubDomainRequest();
+			mockUploadWorkerRequest({
+				expectedModules: {
+					"./0a0a9f2a6772942557ab5355d76af442f8f65e01-textfile.txt":
+						"Hello, World!",
+					"./d025a03cd31e98e96fb5bd5bce87f9bca4e8ce2c-hello.wasm":
+						"Hello wasm World!",
+				},
+			});
+			await runWrangler("deploy index.js --outfile some-dir/worker.bundle");
+
+			expect(fs.existsSync("some-dir/worker.bundle")).toBe(true);
+			expect(
+				fs
+					.readFileSync("some-dir/worker.bundle", "utf8")
+					.replace(
+						/------formdata-undici-0.[0-9]*/g,
+						"------formdata-undici-0.test"
+					)
+					.replace(/wrangler_(.+?)_default/g, "wrangler_default")
+			).toMatchInlineSnapshot(`
+				"------formdata-undici-0.test
+				Content-Disposition: form-data; name=\\"metadata\\"
+
+				{\\"main_module\\":\\"index.js\\",\\"bindings\\":[{\\"name\\":\\"KV\\",\\"type\\":\\"kv_namespace\\",\\"namespace_id\\":\\"kv-namespace-id\\"}],\\"compatibility_date\\":\\"2022-01-12\\",\\"compatibility_flags\\":[]}
+				------formdata-undici-0.test
+				Content-Disposition: form-data; name=\\"index.js\\"; filename=\\"index.js\\"
+				Content-Type: application/javascript+module
+
+				// index.js
+				import txt from \\"./0a0a9f2a6772942557ab5355d76af442f8f65e01-textfile.txt\\";
+				import hello from \\"./d025a03cd31e98e96fb5bd5bce87f9bca4e8ce2c-hello.wasm\\";
+				var wrangler_default = {
+				  async fetch() {
+				    const module = await WebAssembly.instantiate(hello);
+				    return new Response(txt + module.exports.hello);
+				  }
+				};
+				export {
+				  wrangler_default as default
+				};
+				//# sourceMappingURL=index.js.map
+
+				------formdata-undici-0.test
+				Content-Disposition: form-data; name=\\"./0a0a9f2a6772942557ab5355d76af442f8f65e01-textfile.txt\\"; filename=\\"./0a0a9f2a6772942557ab5355d76af442f8f65e01-textfile.txt\\"
+				Content-Type: text/plain
+
+				Hello, World!
+				------formdata-undici-0.test
+				Content-Disposition: form-data; name=\\"./d025a03cd31e98e96fb5bd5bce87f9bca4e8ce2c-hello.wasm\\"; filename=\\"./d025a03cd31e98e96fb5bd5bce87f9bca4e8ce2c-hello.wasm\\"
+				Content-Type: application/wasm
+
+				Hello wasm World!
+				------formdata-undici-0.test--"
+			`);
+
+			expect(std).toMatchInlineSnapshot(`
+				Object {
+				  "debug": "",
+				  "err": "",
+				  "info": "",
+				  "out": "Total Upload: xx KiB / gzip: xx KiB
+				Worker Startup Time: 100 ms
+				Your worker has access to the following bindings:
+				- KV Namespaces:
+				  - KV: kv-namespace-id
+				Uploaded test-name (TIMINGS)
+				Deployed test-name triggers (TIMINGS)
+				  https://test-name.test-sub-domain.workers.dev
+				Current Version ID: Galaxy-Class",
+				  "warn": "",
+				}
+			`);
+		});
+	});
+
+	describe("--outfile", () => {
+		it("should generate worker bundle at --outfile if specified", async () => {
+			writeWranglerConfig();
+			writeWorkerSource();
+			mockSubDomainRequest();
+			mockUploadWorkerRequest();
+			await runWrangler("deploy index.js --outfile some-dir/worker.bundle");
+			expect(fs.existsSync("some-dir/worker.bundle")).toBe(true);
+			expect(std).toMatchInlineSnapshot(`
+				Object {
+				  "debug": "",
+				  "err": "",
+				  "info": "",
+				  "out": "Total Upload: xx KiB / gzip: xx KiB
+				Worker Startup Time: 100 ms
+				No bindings found.
+				Uploaded test-name (TIMINGS)
+				Deployed test-name triggers (TIMINGS)
+				  https://test-name.test-sub-domain.workers.dev
+				Current Version ID: Galaxy-Class",
+				  "warn": "",
+				}
+			`);
+		});
+
+		it("should include any module imports related assets in the worker bundle", async () => {
+			writeWranglerConfig();
+			fs.writeFileSync(
+				"./index.js",
+				`
+import txt from './textfile.txt';
+import hello from './hello.wasm';
+export default{
+  async fetch(){
+		const module = await WebAssembly.instantiate(hello);
+    return new Response(txt + module.exports.hello);
+  }
+}
+`
+			);
+			fs.writeFileSync("./textfile.txt", "Hello, World!");
+			fs.writeFileSync("./hello.wasm", "Hello wasm World!");
+			mockSubDomainRequest();
+			mockUploadWorkerRequest({
+				expectedModules: {
+					"./0a0a9f2a6772942557ab5355d76af442f8f65e01-textfile.txt":
+						"Hello, World!",
+					"./d025a03cd31e98e96fb5bd5bce87f9bca4e8ce2c-hello.wasm":
+						"Hello wasm World!",
+				},
+			});
+			await runWrangler("deploy index.js --outfile some-dir/worker.bundle");
+
+			expect(fs.existsSync("some-dir/worker.bundle")).toBe(true);
+			expect(
+				fs
+					.readFileSync("some-dir/worker.bundle", "utf8")
+					.replace(
+						/------formdata-undici-0.[0-9]*/g,
+						"------formdata-undici-0.test"
+					)
+					.replace(/wrangler_(.+?)_default/g, "wrangler_default")
+			).toMatchInlineSnapshot(`
+				"------formdata-undici-0.test
+				Content-Disposition: form-data; name=\\"metadata\\"
+
+				{\\"main_module\\":\\"index.js\\",\\"bindings\\":[],\\"compatibility_date\\":\\"2022-01-12\\",\\"compatibility_flags\\":[]}
+				------formdata-undici-0.test
+				Content-Disposition: form-data; name=\\"index.js\\"; filename=\\"index.js\\"
+				Content-Type: application/javascript+module
+
+				// index.js
+				import txt from \\"./0a0a9f2a6772942557ab5355d76af442f8f65e01-textfile.txt\\";
+				import hello from \\"./d025a03cd31e98e96fb5bd5bce87f9bca4e8ce2c-hello.wasm\\";
+				var wrangler_default = {
+				  async fetch() {
+				    const module = await WebAssembly.instantiate(hello);
+				    return new Response(txt + module.exports.hello);
+				  }
+				};
+				export {
+				  wrangler_default as default
+				};
+				//# sourceMappingURL=index.js.map
+
+				------formdata-undici-0.test
+				Content-Disposition: form-data; name=\\"./0a0a9f2a6772942557ab5355d76af442f8f65e01-textfile.txt\\"; filename=\\"./0a0a9f2a6772942557ab5355d76af442f8f65e01-textfile.txt\\"
+				Content-Type: text/plain
+
+				Hello, World!
+				------formdata-undici-0.test
+				Content-Disposition: form-data; name=\\"./d025a03cd31e98e96fb5bd5bce87f9bca4e8ce2c-hello.wasm\\"; filename=\\"./d025a03cd31e98e96fb5bd5bce87f9bca4e8ce2c-hello.wasm\\"
+				Content-Type: application/wasm
+
+				Hello wasm World!
+				------formdata-undici-0.test--"
+			`);
+
+			expect(std).toMatchInlineSnapshot(`
+				Object {
+				  "debug": "",
+				  "err": "",
+				  "info": "",
+				  "out": "Total Upload: xx KiB / gzip: xx KiB
+				Worker Startup Time: 100 ms
+				No bindings found.
+				Uploaded test-name (TIMINGS)
+				Deployed test-name triggers (TIMINGS)
+				  https://test-name.test-sub-domain.workers.dev
+				Current Version ID: Galaxy-Class",
+				  "warn": "",
+				}
+			`);
+		});
+
+		it("should include bindings in the worker bundle", async () => {
+			writeWranglerConfig({
+				kv_namespaces: [{ binding: "KV", id: "kv-namespace-id" }],
+			});
+			fs.writeFileSync(
+				"./index.js",
+				`
+import txt from './textfile.txt';
+import hello from './hello.wasm';
+export default{
+  async fetch(){
+		const module = await WebAssembly.instantiate(hello);
+    return new Response(txt + module.exports.hello);
+  }
+}
+`
+			);
+			fs.writeFileSync("./textfile.txt", "Hello, World!");
+			fs.writeFileSync("./hello.wasm", "Hello wasm World!");
+			mockSubDomainRequest();
+			mockUploadWorkerRequest({
+				expectedModules: {
+					"./0a0a9f2a6772942557ab5355d76af442f8f65e01-textfile.txt":
+						"Hello, World!",
+					"./d025a03cd31e98e96fb5bd5bce87f9bca4e8ce2c-hello.wasm":
+						"Hello wasm World!",
+				},
+			});
+			await runWrangler("deploy index.js --outfile some-dir/worker.bundle");
+
+			expect(fs.existsSync("some-dir/worker.bundle")).toBe(true);
+			expect(
+				fs
+					.readFileSync("some-dir/worker.bundle", "utf8")
+					.replace(
+						/------formdata-undici-0.[0-9]*/g,
+						"------formdata-undici-0.test"
+					)
+					.replace(/wrangler_(.+?)_default/g, "wrangler_default")
+			).toMatchInlineSnapshot(`
+				"------formdata-undici-0.test
+				Content-Disposition: form-data; name=\\"metadata\\"
+
+				{\\"main_module\\":\\"index.js\\",\\"bindings\\":[{\\"name\\":\\"KV\\",\\"type\\":\\"kv_namespace\\",\\"namespace_id\\":\\"kv-namespace-id\\"}],\\"compatibility_date\\":\\"2022-01-12\\",\\"compatibility_flags\\":[]}
+				------formdata-undici-0.test
+				Content-Disposition: form-data; name=\\"index.js\\"; filename=\\"index.js\\"
+				Content-Type: application/javascript+module
+
+				// index.js
+				import txt from \\"./0a0a9f2a6772942557ab5355d76af442f8f65e01-textfile.txt\\";
+				import hello from \\"./d025a03cd31e98e96fb5bd5bce87f9bca4e8ce2c-hello.wasm\\";
+				var wrangler_default = {
+				  async fetch() {
+				    const module = await WebAssembly.instantiate(hello);
+				    return new Response(txt + module.exports.hello);
+				  }
+				};
+				export {
+				  wrangler_default as default
+				};
+				//# sourceMappingURL=index.js.map
+
+				------formdata-undici-0.test
+				Content-Disposition: form-data; name=\\"./0a0a9f2a6772942557ab5355d76af442f8f65e01-textfile.txt\\"; filename=\\"./0a0a9f2a6772942557ab5355d76af442f8f65e01-textfile.txt\\"
+				Content-Type: text/plain
+
+				Hello, World!
+				------formdata-undici-0.test
+				Content-Disposition: form-data; name=\\"./d025a03cd31e98e96fb5bd5bce87f9bca4e8ce2c-hello.wasm\\"; filename=\\"./d025a03cd31e98e96fb5bd5bce87f9bca4e8ce2c-hello.wasm\\"
+				Content-Type: application/wasm
+
+				Hello wasm World!
+				------formdata-undici-0.test--"
+			`);
+
+			expect(std).toMatchInlineSnapshot(`
+				Object {
+				  "debug": "",
+				  "err": "",
+				  "info": "",
+				  "out": "Total Upload: xx KiB / gzip: xx KiB
+				Worker Startup Time: 100 ms
+				Your worker has access to the following bindings:
+				- KV Namespaces:
+				  - KV: kv-namespace-id
 				Uploaded test-name (TIMINGS)
 				Deployed test-name triggers (TIMINGS)
 				  https://test-name.test-sub-domain.workers.dev
@@ -11070,36 +11601,9 @@ export default{
 				main: "index.js",
 			});
 
-			await expect(runWrangler("deploy")).rejects.toMatchInlineSnapshot(
-				`[APIError: A request to the Cloudflare API (/accounts/some-account-id/workers/scripts/test-name/versions) failed.]`
+			await expect(runWrangler("deploy")).rejects.toThrowError(
+				`Your Worker failed validation because it exceeded startup limits.`
 			);
-			expect(std).toMatchInlineSnapshot(`
-				Object {
-				  "debug": "",
-				  "err": "",
-				  "info": "",
-				  "out": "Total Upload: xx KiB / gzip: xx KiB
-				No bindings found.
-
-				[31mX [41;31m[[41;97mERROR[41;31m][0m [1mA request to the Cloudflare API (/accounts/some-account-id/workers/scripts/test-name/versions) failed.[0m
-
-				  Error: Script startup exceeded CPU time limit. [code: 10021]
-
-				  If you think this is a bug, please open an issue at:
-				  [4mhttps://github.com/cloudflare/workers-sdk/issues/new/choose[0m
-
-				",
-				  "warn": "[33m▲ [43;33m[[43;30mWARNING[43;33m][0m [1mYour Worker failed validation because it exceeded startup limits.[0m
-
-				  To ensure fast responses, we place constraints on Worker startup -- like how much CPU it can use,
-				  or how long it can take.
-				  Your Worker failed validation, which means it hit one of these startup limits.
-				  Try reducing the amount of work done during startup (outside the event handler), either by
-				  removing code or relocating it inside the event handler.
-
-				",
-				}
-			`);
 		});
 
 		describe("unit tests", () => {

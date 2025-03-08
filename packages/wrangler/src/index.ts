@@ -13,6 +13,7 @@ import {
 	certUploadMtlsCommand,
 	certUploadNamespace,
 } from "./cert/cert";
+import { checkNamespace, checkStartupCommand } from "./check/commands";
 import { cloudchamber } from "./cloudchamber";
 import { experimental_readRawConfig, loadDotEnv } from "./config";
 import { demandSingleValue } from "./core";
@@ -20,7 +21,7 @@ import { CommandRegistry } from "./core/CommandRegistry";
 import { createRegisterYargsCommand } from "./core/register-yargs-command";
 import { d1 } from "./d1";
 import { deleteHandler, deleteOptions } from "./delete";
-import { deployHandler, deployOptions } from "./deploy";
+import { deployCommand, publishAlias } from "./deploy";
 import { isAuthenticationError } from "./deploy/deploy";
 import {
 	isBuildFailure,
@@ -114,6 +115,13 @@ import {
 	r2BucketLifecycleRemoveCommand,
 	r2BucketLifecycleSetCommand,
 } from "./r2/lifecycle";
+import {
+	r2BucketLockAddCommand,
+	r2BucketLockListCommand,
+	r2BucketLockNamespace,
+	r2BucketLockRemoveCommand,
+	r2BucketLockSetCommand,
+} from "./r2/lock";
 import {
 	r2BucketNotificationCreateCommand,
 	r2BucketNotificationDeleteCommand,
@@ -230,6 +238,18 @@ export function createCLIParser(argv: string[]) {
 			alias: "version",
 			type: "boolean",
 		})
+		.option("cwd", {
+			describe:
+				"Run as if Wrangler was started in the specified directory instead of the current working directory",
+			type: "string",
+			requiresArg: true,
+		})
+		.check(demandSingleValue("cwd"))
+		.middleware((_argv) => {
+			if (_argv.cwd) {
+				process.chdir(_argv.cwd);
+			}
+		})
 		.option("config", {
 			alias: "c",
 			describe: "Path to Wrangler configuration file",
@@ -308,7 +328,7 @@ export function createCLIParser(argv: string[]) {
 		"Examples:": `${chalk.bold("EXAMPLES")}`,
 	});
 	wrangler.group(
-		["config", "env", "help", "version"],
+		["config", "cwd", "env", "help", "version"],
 		`${chalk.bold("GLOBAL FLAGS")}`
 	);
 	wrangler.help("help", "Show help").alias("h", "help");
@@ -393,13 +413,17 @@ export function createCLIParser(argv: string[]) {
 	]);
 	registry.registerNamespace("dev");
 
-	// deploy
-	wrangler.command(
-		["deploy [script]", "publish [script]"],
-		"🆙 Deploy a Worker to Cloudflare",
-		deployOptions,
-		deployHandler
-	);
+	registry.define([
+		{
+			command: "wrangler deploy",
+			definition: deployCommand,
+		},
+		{
+			command: "wrangler publish",
+			definition: publishAlias,
+		},
+	]);
+	registry.registerNamespace("deploy");
 
 	registry.define([
 		{ command: "wrangler deployments", definition: deploymentsNamespace },
@@ -696,6 +720,26 @@ export function createCLIParser(argv: string[]) {
 			command: "wrangler r2 bucket cors set",
 			definition: r2BucketCORSSetCommand,
 		},
+		{
+			command: "wrangler r2 bucket lock",
+			definition: r2BucketLockNamespace,
+		},
+		{
+			command: "wrangler r2 bucket lock list",
+			definition: r2BucketLockListCommand,
+		},
+		{
+			command: "wrangler r2 bucket lock add",
+			definition: r2BucketLockAddCommand,
+		},
+		{
+			command: "wrangler r2 bucket lock remove",
+			definition: r2BucketLockRemoveCommand,
+		},
+		{
+			command: "wrangler r2 bucket lock set",
+			definition: r2BucketLockSetCommand,
+		},
 	]);
 	registry.registerNamespace("r2");
 
@@ -888,6 +932,18 @@ export function createCLIParser(argv: string[]) {
 		},
 	]);
 	registry.registerNamespace("telemetry");
+
+	registry.define([
+		{
+			command: "wrangler check",
+			definition: checkNamespace,
+		},
+		{
+			command: "wrangler check startup",
+			definition: checkStartupCommand,
+		},
+	]);
+	registry.registerNamespace("check");
 
 	/******************************************************/
 	/*               DEPRECATED COMMANDS                  */
@@ -1168,10 +1224,12 @@ export async function main(argv: string[]): Promise<void> {
 			}
 
 			await closeSentry();
+			const controller = new AbortController();
+
 			await Promise.race([
-				await Promise.allSettled(dispatcher?.requests ?? []),
-				setTimeout(1000), // Ensure we don't hang indefinitely
-			]);
+				Promise.allSettled(dispatcher?.requests ?? []),
+				setTimeout(1000, undefined, controller), // Ensure we don't hang indefinitely
+			]).then(() => controller.abort()); // Ensure the Wrangler process doesn't hang waiting for setTimeout(1000) to complete
 		} catch (e) {
 			logger.error(e);
 			// Only re-throw if we haven't already re-thrown an exception from a
