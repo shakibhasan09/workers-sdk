@@ -21,6 +21,7 @@ import type {
 	CfQueue,
 	CfR2Bucket,
 	CfScriptFormat,
+	CfSecretsStoreSecrets,
 	CfSendEmailBindings,
 	CfService,
 	CfUnsafe,
@@ -173,7 +174,6 @@ export interface StartDevWorkerInput {
 	};
 	legacy?: {
 		site?: Hook<Config["site"], [Config]>;
-		legacyAssets?: Hook<Config["legacy_assets"], [Config]>;
 		enableServiceEnvironments?: boolean;
 	};
 	unsafe?: Omit<CfUnsafe, "bindings">;
@@ -195,7 +195,6 @@ export type StartDevWorkerOptions = Omit<StartDevWorkerInput, "assets"> & {
 		processEntrypoint: boolean;
 	};
 	legacy: StartDevWorkerInput["legacy"] & {
-		legacyAssets?: Config["legacy_assets"];
 		site?: Config["site"];
 	};
 	dev: StartDevWorkerInput["dev"] & {
@@ -262,6 +261,7 @@ export type Binding =
 	| ({ type: "dispatch_namespace" } & BindingOmit<CfDispatchNamespace>)
 	| ({ type: "mtls_certificate" } & BindingOmit<CfMTlsCertificate>)
 	| ({ type: "pipeline" } & BindingOmit<CfPipeline>)
+	| ({ type: "secrets_store_secret" } & BindingOmit<CfSecretsStoreSecrets>)
 	| ({ type: "logfwdr" } & NameOmit<CfLogfwdrBinding>)
 	| { type: `unsafe_${string}` }
 	| { type: "assets" };

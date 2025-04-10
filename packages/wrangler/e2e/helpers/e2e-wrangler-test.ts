@@ -68,6 +68,28 @@ export class WranglerE2ETestHelper {
 		return id;
 	}
 
+	async secretsStore(isLocal: boolean) {
+		const name = generateResourceName("secrets-store");
+		if (isLocal) {
+			return name;
+		}
+		const result = await this.run(
+			`wrangler secrets-store store create ${name} --remote`
+		);
+
+		const regex = /ID:\s*(\w{32})/;
+		const match = result.output.match(regex);
+
+		assert(match !== null, `Cannot find ID in ${JSON.stringify(result)}`);
+		const id = match[1];
+		onTestFinished(async () => {
+			if (!isLocal) {
+				await this.run(`wrangler secrets-store store delete ${id} --remote`);
+			}
+		});
+		return id;
+	}
+
 	async dispatchNamespace(isLocal: boolean) {
 		const name = generateResourceName("dispatch");
 		if (isLocal) {
@@ -112,14 +134,18 @@ export class WranglerE2ETestHelper {
 		return { id, name };
 	}
 
-	async vectorize(dimensions: number, metric: string) {
+	async vectorize(dimensions: number, metric: string, resourceName?: string) {
 		// vectorize does not have a local dev mode yet, so we don't yet support the isLocal flag here
-		const name = generateResourceName("vectorize");
-		await this.run(
-			`wrangler vectorize create ${name} --dimensions ${dimensions} --metric ${metric}`
-		);
+		const name = resourceName ?? generateResourceName("vectorize");
+		if (!resourceName) {
+			await this.run(
+				`wrangler vectorize create ${name} --dimensions ${dimensions} --metric ${metric}`
+			);
+		}
 		onTestFinished(async () => {
-			await this.run(`wrangler vectorize delete ${name}`);
+			if (!resourceName) {
+				await this.run(`wrangler vectorize delete ${name}`);
+			}
 		});
 
 		return name;

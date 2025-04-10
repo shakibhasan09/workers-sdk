@@ -1,7 +1,8 @@
-import assert from "node:assert";
+import assert, { fail } from "node:assert";
 import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import * as nodeNet from "node:net";
-import { setTimeout } from "node:timers/promises";
+import { scheduler, setTimeout } from "node:timers/promises";
 import dedent from "ts-dedent";
 import { fetch } from "undici";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -21,36 +22,6 @@ import { getStartedWorkerdProcesses } from "./helpers/workerd-processes";
  * when multiple PRs have jobs running at the same time (or the same PR has the tests run across multiple OSes).
  */
 const workerName = generateResourceName();
-
-it("can import URL from 'url' in node_compat mode", async () => {
-	const helper = new WranglerE2ETestHelper();
-	await helper.seed({
-		"wrangler.toml": dedent`
-				name = "${workerName}"
-				main = "src/index.ts"
-				compatibility_date = "2023-01-01"
-				node_compat = true
-		`,
-		"src/index.ts": dedent`
-				const { URL } = require('url');
-				const { URL: nURL } = require('node:url');
-
-				export default {
-					fetch(request) {
-						const url = new URL('postgresql://user:password@example.com:12345/dbname?sslmode=disable')
-						const nUrl = new nURL('postgresql://user:password@example.com:12345/dbname?sslmode=disable')
-						return new Response(url + nUrl)
-					}
-				}`,
-	});
-	const worker = helper.runLongLived(`wrangler dev`);
-
-	const { url } = await worker.waitForReady();
-
-	await expect(fetchText(url)).resolves.toMatchInlineSnapshot(
-		`"postgresql://user:password@example.com:12345/dbname?sslmode=disablepostgresql://user:password@example.com:12345/dbname?sslmode=disable"`
-	);
-});
 
 describe.each([{ cmd: "wrangler dev" }, { cmd: "wrangler dev --remote" }])(
 	"basic js dev: $cmd",
@@ -484,6 +455,46 @@ describe.each([{ cmd: "wrangler dev" }])(
 			);
 
 			expect(text).toBe("py hello world 5");
+		});
+
+		it(`can print during ${cmd}`, async () => {
+			const helper = new WranglerE2ETestHelper();
+			await helper.seed({
+				"wrangler.toml": dedent`
+					name = "${workerName}"
+					main = "index.py"
+					compatibility_date = "2023-01-01"
+					compatibility_flags = ["python_workers"]
+			`,
+				"arithmetic.py": dedent`
+					def mul(a,b):
+						return a*b`,
+				"index.py": dedent`
+					from arithmetic import mul
+
+					from js import Response, console
+					def on_fetch(request):
+						console.log(f"hello {mul(2,3)}")
+						print(f"foobar {mul(4,3)}")
+						console.log(f"end")
+						return Response.new(f"py hello world {mul(2,3)}")`,
+				"package.json": dedent`
+					{
+						"name": "worker",
+						"version": "0.0.0",
+						"private": true
+					}
+					`,
+			});
+			const worker = helper.runLongLived(cmd);
+
+			const { url } = await worker.waitForReady();
+
+			await expect(fetchText(url)).resolves.toBe("py hello world 6");
+
+			await worker.readUntil(/hello 6/);
+			await worker.readUntil(/foobar 12/);
+			await worker.readUntil(/end/);
 		});
 	}
 );
@@ -1992,4 +2003,253 @@ describe("watch mode", () => {
 			});
 		}
 	);
+});
+
+describe("email local dev", () => {
+	it("should save file on reply", async () => {
+		const helper = new WranglerE2ETestHelper();
+		await helper.seed({
+			"wrangler.toml": dedent`
+					name = "${workerName}"
+					main = "src/index.ts"
+					compatibility_date = "2025-03-17"
+			`,
+			"src/index.ts": dedent`
+			import { EmailMessage } from "cloudflare:email";
+
+			export default {
+				async email(emailMessage) {
+				await emailMessage.reply(
+					new EmailMessage(
+						"someone-else@example.com",
+						"someone@example.com",
+\`From: someone else <someone-else@example.com>
+To: someone <someone@example.com>
+In-Reply-To: <im-a-random-message-id@example.com>
+Message-ID: <im-another-random-message-id@example.com>
+MIME-Version: 1.0
+Content-Type: text/plain
+
+This is a random email body.
+\`)
+				);
+				}
+			}
+	`,
+		});
+
+		const worker = helper.runLongLived("wrangler dev");
+
+		const { url } = await worker.waitForReady();
+
+		const response = await fetch(
+			`${url}/cdn-cgi/handler/email?from=someone@example.com&to=someone-else@example.com`,
+			{
+				body: dedent`
+				From: someone <someone@example.com>
+				To: someone else <someone-else@example.com>
+				MIME-Version: 1.0
+				Message-ID: <im-a-random-message-id@example.com>
+				Content-Type: text/plain
+
+				This is a random email body.
+			`,
+				method: "POST",
+			}
+		);
+
+		expect(response.status).toBe(200);
+
+		expect(worker.currentOutput).includes(
+			"Email handler replied to sender with the following message:"
+		);
+
+		const pathRegexp = new RegExp(
+			"Email handler replied to sender with the following message:\\s*(\\S*)"
+		);
+
+		const maybeReplyPath = pathRegexp.exec(worker.currentOutput)?.[1];
+
+		if (maybeReplyPath === undefined) {
+			fail("Reply message does not contain path");
+		}
+
+		expect(await readFile(maybeReplyPath, "utf-8")).toMatchInlineSnapshot(`
+			"References: <im-a-random-message-id@example.com>
+			From: someone else <someone-else@example.com>
+			To: someone <someone@example.com>
+			In-Reply-To: <im-a-random-message-id@example.com>
+			Message-ID: <im-another-random-message-id@example.com>
+			MIME-Version: 1.0
+			Content-Type: text/plain
+
+			This is a random email body.
+			"
+		`);
+	});
+
+	it("should print reject with reason", async () => {
+		const helper = new WranglerE2ETestHelper();
+		await helper.seed({
+			"wrangler.toml": dedent`
+					name = "${workerName}"
+					main = "src/index.ts"
+					compatibility_date = "2025-03-17"
+			`,
+			"src/index.ts": dedent`
+			import { EmailMessage } from "cloudflare:email";
+
+			export default {
+				async email(emailMessage) {
+					await emailMessage.setReject('I dont like this email')
+				}
+			}`,
+		});
+
+		const worker = helper.runLongLived("wrangler dev");
+
+		const { url } = await worker.waitForReady();
+
+		const response = await fetch(
+			`${url}/cdn-cgi/handler/email?from=someone@example.com&to=someone-else@example.com`,
+			{
+				body: `From: someone <someone@example.com>
+To: someone else <someone-else@example.com>
+MIME-Version: 1.0
+Message-ID: <im-a-random-message-id@example.com>
+Content-Type: text/plain
+
+This is a random email body.
+`,
+				method: "POST",
+			}
+		);
+
+		expect(await response.text()).toMatchInlineSnapshot(
+			`"Worker rejected email with the following reason: I dont like this email"`
+		);
+
+		expect(response.status).toBe(400);
+	});
+
+	it("should print forward email", async () => {
+		const helper = new WranglerE2ETestHelper();
+		await helper.seed({
+			"wrangler.toml": dedent`
+					name = "${workerName}"
+					main = "src/index.ts"
+					compatibility_date = "2025-03-17"
+			`,
+			"src/index.ts": dedent`
+			import { EmailMessage } from "cloudflare:email";
+
+			export default {
+				async email(emailMessage) {
+					await emailMessage.forward('mark.s@example.com')
+				}
+			}`,
+		});
+
+		const worker = helper.runLongLived("wrangler dev");
+
+		const { url } = await worker.waitForReady();
+
+		const response = await fetch(
+			`${url}/cdn-cgi/handler/email?from=someone@example.com&to=someone-else@example.com`,
+			{
+				body: `From: someone <someone@example.com>
+To: someone else <someone-else@example.com>
+MIME-Version: 1.0
+Message-ID: <im-a-random-message-id@example.com>
+Content-Type: text/plain
+
+This is a random email body.
+`,
+				method: "POST",
+			}
+		);
+
+		expect(response.status).toBe(200);
+
+		expect(worker.currentOutput).includes(
+			`Email handler forwarded message with`
+		);
+		expect(worker.currentOutput).includes(`rcptTo: mark.s@example.com`);
+	});
+
+	it("should save file on send_email", async () => {
+		const helper = new WranglerE2ETestHelper();
+		await helper.seed({
+			"wrangler.toml": dedent`
+					name = "${workerName}"
+					main = "src/index.ts"
+					compatibility_date = "2025-03-17"
+					send_email = [{name = "SEND_EMAIL"}]
+			`,
+			"src/index.ts": dedent`
+				import { EmailMessage } from "cloudflare:email";
+
+				export default {
+					async fetch(request, env, ctx) {
+						const url = new URL(request.url);
+
+						await env.SEND_EMAIL.send(new EmailMessage(
+							url.searchParams.get("from"),
+							url.searchParams.get("to"),
+							request.body
+						))
+
+						return new Response("ok")
+					},
+				};`,
+		});
+
+		const worker = helper.runLongLived("wrangler dev");
+
+		const { url } = await worker.waitForReady();
+
+		const response = await fetch(
+			`${url}?from=someone@example.com&to=someone-else@example.com`,
+			{
+				body: `From: someone <someone@example.com>
+To: someone else <someone-else@example.com>
+Message-ID: <im-a-random-message-id@example.com>
+MIME-Version: 1.0
+Content-Type: text/plain
+
+This is a random email body.
+`,
+				method: "POST",
+			}
+		);
+
+		expect(response.status).toBe(200);
+
+		await scheduler.wait(1000);
+
+		expect(worker.currentOutput).includes(
+			"send_email binding called with the following message"
+		);
+
+		const pathRegexp = new RegExp(
+			"send_email binding called with the following message:\\s*(\\S*)"
+		);
+
+		const maybeReplyPath = pathRegexp.exec(worker.currentOutput)?.[1];
+
+		if (maybeReplyPath === undefined || maybeReplyPath === null) {
+			fail("send_email message does not contain path");
+		}
+
+		expect(await readFile(maybeReplyPath, "utf-8")).toMatchInlineSnapshot(`
+			"From: someone <someone@example.com>
+			To: someone else <someone-else@example.com>
+			Message-ID: <im-a-random-message-id@example.com>
+			MIME-Version: 1.0
+			Content-Type: text/plain
+
+			This is a random email body.
+			"
+		`);
+	});
 });

@@ -402,19 +402,6 @@ export function getAssetsOptions(
 		invoke_user_worker_ahead_of_assets: config.assets?.run_worker_first,
 	};
 
-	if (config.assets?.experimental_serve_directly !== undefined) {
-		if (routerConfig.invoke_user_worker_ahead_of_assets === undefined) {
-			routerConfig.invoke_user_worker_ahead_of_assets =
-				!config.assets?.experimental_serve_directly;
-		} else {
-			// Provided both the run_worker_first and experimental_serve_directly options
-			throw new UserError(
-				"run_worker_first and experimental_serve_directly specified.\n" +
-					"Only one of these configuration options may be provided."
-			);
-		}
-	}
-
 	// User Worker ahead of assets, but no assets binding provided
 	if (
 		routerConfig.invoke_user_worker_ahead_of_assets &&
@@ -428,32 +415,29 @@ export function getAssetsOptions(
 		);
 	}
 
-	// Using run_worker_first=true or experimental_serve_directly=false, but didn't provide a Worker script
+	// Using run_worker_first = true but didn't provide a Worker script
 	if (
 		!routerConfig.has_user_worker &&
 		routerConfig.invoke_user_worker_ahead_of_assets === true
 	) {
-		if (config.assets?.experimental_serve_directly !== undefined) {
-			throw new UserError(
-				"Cannot set experimental_serve_directly=false without a Worker script.\n" +
-					"Please remove experimental_serve_directly from your configuration file, or provide a Worker script in your configuration file (`main`)."
-			);
-		} else {
-			throw new UserError(
-				"Cannot set run_worker_first=true without a Worker script.\n" +
-					"Please remove run_worker_first from your configuration file, or provide a Worker script in your configuration file (`main`)."
-			);
-		}
+		throw new UserError(
+			"Cannot set run_worker_first=true without a Worker script.\n" +
+				"Please remove run_worker_first from your configuration file, or provide a Worker script in your configuration file (`main`)."
+		);
 	}
 
-	const redirects = maybeGetFile(path.join(directory, REDIRECTS_FILENAME));
-	const headers = maybeGetFile(path.join(directory, HEADERS_FILENAME));
+	const redirects = maybeGetFile(
+		path.join(resolvedAssetsPath, REDIRECTS_FILENAME)
+	);
+	const headers = maybeGetFile(path.join(resolvedAssetsPath, HEADERS_FILENAME));
 
 	// defaults are set in asset worker
 	const assetConfig: AssetConfig = {
 		html_handling: config.assets?.html_handling,
 		not_found_handling: config.assets?.not_found_handling,
 		// The _redirects and _headers files are parsed in Miniflare in dev and parsing is not required for deploy
+		compatibility_date: config.compatibility_date,
+		compatibility_flags: config.compatibility_flags,
 	};
 
 	return {
@@ -478,37 +462,17 @@ export function validateAssetsArgsAndConfig(
 ): void;
 export function validateAssetsArgsAndConfig(
 	args:
-		| Pick<StartDevOptions, "legacyAssets" | "site" | "assets" | "script">
-		| Pick<DeployArgs, "legacyAssets" | "site" | "assets" | "script">,
+		| Pick<StartDevOptions, "site" | "assets" | "script">
+		| Pick<DeployArgs, "site" | "assets" | "script">,
 	config: Config
 ): void;
 export function validateAssetsArgsAndConfig(
 	args:
-		| Pick<StartDevOptions, "legacyAssets" | "site" | "assets" | "script">
-		| Pick<DeployArgs, "legacyAssets" | "site" | "assets" | "script">
+		| Pick<StartDevOptions, "site" | "assets" | "script">
+		| Pick<DeployArgs, "site" | "assets" | "script">
 		| Pick<StartDevWorkerOptions, "legacy" | "assets" | "entrypoint">,
 	config?: Config
 ): void {
-	/*
-	 * - `config.legacy_assets` conflates `legacy_assets` and `assets`
-	 * - `args.legacyAssets` conflates `legacy-assets` and `assets`
-	 */
-	if (
-		"legacy" in args
-			? args.assets && args.legacy.legacyAssets
-			: (args.assets || config?.assets) &&
-				(args?.legacyAssets || config?.legacy_assets)
-	) {
-		throw new UserError(
-			"Cannot use assets and legacy assets in the same Worker.\n" +
-				"Please remove either the `legacy_assets` or `assets` field from your configuration file.",
-			{
-				telemetryMessage:
-					"Cannot use assets and legacy assets in the same Worker",
-			}
-		);
-	}
-
 	if (
 		"legacy" in args
 			? args.assets && args.legacy.site

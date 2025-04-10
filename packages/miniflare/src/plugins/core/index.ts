@@ -33,10 +33,7 @@ import {
 	CoreHeaders,
 	viewToBuffer,
 } from "../../workers";
-import {
-	ROUTER_SERVICE_NAME,
-	RPC_PROXY_SERVICE_NAME,
-} from "../assets/constants";
+import { RPC_PROXY_SERVICE_NAME } from "../assets/constants";
 import { getCacheServiceName } from "../cache";
 import { DURABLE_OBJECTS_STORAGE_SERVICE_NAME } from "../do";
 import {
@@ -126,6 +123,8 @@ const CoreOptionsSchemaInput = z.intersection(
 		compatibilityDate: z.string().optional(),
 		compatibilityFlags: z.string().array().optional(),
 
+		unsafeInspectorProxy: z.boolean().optional(),
+
 		routes: z.string().array().optional(),
 
 		bindings: z.record(JsonSchema).optional(),
@@ -156,7 +155,6 @@ const CoreOptionsSchemaInput = z.intersection(
 		 Router Worker)
 		 */
 		hasAssetsAndIsVitest: z.boolean().optional(),
-		unsafeEnableAssetsRpc: z.boolean().optional(),
 	})
 );
 export const CoreOptionsSchema = CoreOptionsSchemaInput.transform((value) => {
@@ -191,6 +189,7 @@ export const CoreSharedOptionsSchema = z.object({
 	httpsCertPath: z.string().optional(),
 
 	inspectorPort: z.number().optional(),
+
 	verbose: z.boolean().optional(),
 
 	log: z.instanceof(Log).optional(),
@@ -211,8 +210,10 @@ export const CoreSharedOptionsSchema = z.object({
 	unsafeModuleFallbackService: ServiceFetchSchema.optional(),
 	// Keep blobs when deleting/overwriting keys, required for stacked storage
 	unsafeStickyBlobs: z.boolean().optional(),
-
-	unsafeEnableAssetsRpc: z.boolean().optional(),
+	// Enable directly triggering user Worker handlers with paths like `/cdn-cgi/handler/scheduled`
+	unsafeTriggerHandlers: z.boolean().optional(),
+	// Enable logging requests
+	logRequests: z.boolean().default(true),
 });
 
 export const CORE_PLUGIN_NAME = "core";
@@ -250,8 +251,7 @@ function getCustomServiceDesignator(
 	kind: CustomServiceKind,
 	name: string,
 	service: z.infer<typeof ServiceDesignatorSchema>,
-	hasAssetsAndIsVitest: boolean = false,
-	unsafeEnableAssetsRpc = false
+	hasAssetsAndIsVitest: boolean = false
 ): ServiceDesignator {
 	let serviceName: string;
 	let entrypoint: string | undefined;
@@ -273,13 +273,10 @@ function getCustomServiceDesignator(
 			serviceName = getBuiltinServiceName(workerIndex, kind, name);
 		}
 	} else if (service === kCurrentWorker) {
-		// Sets SELF binding to point to the Router Worker or the Assets
-		// Proxy Worker (depending on whether `unsafeEnableAssetsRpc` is set)
+		// Sets SELF binding to point to the (assets) RPC Proxy Worker
 		// if assets are present.
 		serviceName = hasAssetsAndIsVitest
-			? unsafeEnableAssetsRpc
-				? `${RPC_PROXY_SERVICE_NAME}:${refererName}`
-				: `${ROUTER_SERVICE_NAME}:${refererName}`
+			? `${RPC_PROXY_SERVICE_NAME}:${refererName}`
 			: getUserServiceName(refererName);
 	} else {
 		// Regular user worker
@@ -432,8 +429,7 @@ export const CORE_PLUGIN: Plugin<
 							CustomServiceKind.UNKNOWN,
 							name,
 							service,
-							options.hasAssetsAndIsVitest,
-							options.unsafeEnableAssetsRpc
+							options.hasAssetsAndIsVitest
 						),
 					};
 				})
@@ -692,8 +688,7 @@ export const CORE_PLUGIN: Plugin<
 									CustomServiceKind.KNOWN,
 									CUSTOM_SERVICE_KNOWN_OUTBOUND,
 									options.outboundService,
-									options.hasAssetsAndIsVitest,
-									options.unsafeEnableAssetsRpc
+									options.hasAssetsAndIsVitest
 								),
 					cacheApiOutbound: { name: getCacheServiceName(workerIndex) },
 					moduleFallback:
@@ -755,6 +750,14 @@ export function getGlobalServices({
 	const serviceEntryBindings: Worker_Binding[] = [
 		WORKER_BINDING_SERVICE_LOOPBACK, // For converting stack-traces to pretty-error pages
 		{ name: CoreBindings.JSON_ROUTES, json: JSON.stringify(routes) },
+		{
+			name: CoreBindings.TRIGGER_HANDLERS,
+			json: JSON.stringify(!!sharedOptions.unsafeTriggerHandlers),
+		},
+		{
+			name: CoreBindings.LOG_REQUESTS,
+			json: JSON.stringify(!!sharedOptions.logRequests),
+		},
 		{ name: CoreBindings.JSON_CF_BLOB, json: JSON.stringify(sharedOptions.cf) },
 		{ name: CoreBindings.JSON_LOG_LEVEL, json: JSON.stringify(log.level) },
 		{
@@ -804,13 +807,8 @@ export function getGlobalServices({
 			name: SERVICE_ENTRY,
 			worker: {
 				modules: [{ name: "entry.worker.js", esModule: SCRIPT_ENTRY() }],
-				compatibilityDate: "2023-04-04",
-				compatibilityFlags: [
-					"nodejs_compat",
-					"service_binding_extra_handlers",
-					"brotli_content_encoding",
-					"rpc",
-				],
+				compatibilityDate: "2025-03-17",
+				compatibilityFlags: ["nodejs_compat", "service_binding_extra_handlers"],
 				bindings: serviceEntryBindings,
 				durableObjectNamespaces: [
 					{

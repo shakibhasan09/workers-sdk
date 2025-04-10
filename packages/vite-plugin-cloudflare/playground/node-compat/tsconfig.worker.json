@@ -6,6 +6,8 @@
 		"worker-crypto",
 		"worker-postgres",
 		"worker-process",
-		"worker-random"
+		"worker-random",
+		"worker-resolve-externals",
+		"worker-warnings"
 	]
 }

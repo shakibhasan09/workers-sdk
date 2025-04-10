@@ -1,6 +1,6 @@
 import chalk from "chalk";
 import { readConfig } from "../../config";
-import { FatalError } from "../../errors";
+import { FatalError, UserError } from "../../errors";
 import { logger } from "../../logger";
 import { requireAuth } from "../../user";
 import { printWranglerBanner } from "../../wrangler-banner";
@@ -16,7 +16,7 @@ import type {
 	CommonYargsOptions,
 	StrictYargsOptionsToInterface,
 } from "../../yargs-types";
-import type { HttpSource, Source } from "../client";
+import type { BindingSource, HttpSource, Source } from "../client";
 import type { Argv } from "yargs";
 
 /**
@@ -26,13 +26,13 @@ import type { Argv } from "yargs";
  */
 export function addUpdateOptions(yargs: Argv<CommonYargsOptions>) {
 	/* These arguments are nearly identical to the option used for creating a pipeline, with some notable differences.
-		 Particularly, not all options are available for updating, and the default values have been removed. In this case, 
+		 Particularly, not all options are available for updating, and the default values have been removed. In this case,
 		 `undefined` is used to determine if the user provided that flag at all with the intent to change the value.
 	 */
 	return (
 		yargs
 			.positional("pipeline", {
-				describe: "The name of the Pipeline to update",
+				describe: "The name of the pipeline to update",
 				type: "string",
 				demandOption: true,
 			})
@@ -43,22 +43,13 @@ export function addUpdateOptions(yargs: Argv<CommonYargsOptions>) {
 			})
 			// Sources
 			.group(
-				[
-					"enable-worker-binding",
-					"enable-http",
-					"require-http-auth",
-					"cors-origins",
-				],
+				["source", "require-http-auth", "cors-origins"],
 				`${chalk.bold("Source settings")}`
 			)
-			.option("enable-worker-binding", {
-				type: "boolean",
-				describe: "Send data from a Worker to a Pipeline using a Binding",
-				demandOption: false,
-			})
-			.option("enable-http", {
-				type: "boolean",
-				describe: "Generate an endpoint to ingest data via HTTP",
+			.option("source", {
+				type: "array",
+				describe:
+					"Space separated list of allowed sources. Options are 'http' or 'worker'",
 				demandOption: false,
 			})
 			.option("require-http-auth", {
@@ -82,19 +73,22 @@ export function addUpdateOptions(yargs: Argv<CommonYargsOptions>) {
 			)
 			.option("batch-max-mb", {
 				type: "number",
-				describe: "Maximum batch size in megabytes before flushing",
+				describe:
+					"Maximum batch size in megabytes before flushing. Minimum: 1, Maximum: 100",
 				demandOption: false,
 				coerce: validateInRange("batch-max-mb", 1, 100),
 			})
 			.option("batch-max-rows", {
 				type: "number",
-				describe: "Maximum number of rows per batch before flushing",
+				describe:
+					"Maximum number of rows per batch before flushing. Minimum: 100, Maximum: 10,000,000",
 				demandOption: false,
-				coerce: validateInRange("batch-max-rows", 100, 1000000),
+				coerce: validateInRange("batch-max-rows", 100, 10_000_000),
 			})
 			.option("batch-max-seconds", {
 				type: "number",
-				describe: "Maximum age of batch in seconds before flushing",
+				describe:
+					"Maximum age of batch in seconds before flushing. Minimum: 1, Maximum: 300",
 				demandOption: false,
 				coerce: validateInRange("batch-max-seconds", 1, 300),
 			})
@@ -104,8 +98,9 @@ export function addUpdateOptions(yargs: Argv<CommonYargsOptions>) {
 			.option("transform-worker", {
 				type: "string",
 				describe:
-					"Pipeline transform Worker and entrypoint (<worker>.<entrypoint>)",
+					'Pipeline transform Worker and entrypoint, to transform ingested records. Specified as <worker-name>.<entrypoint>, or "none".',
 				demandOption: false,
+				hidden: true, // TODO: Remove once transformations launch
 			})
 
 			// Destination options
@@ -116,8 +111,6 @@ export function addUpdateOptions(yargs: Argv<CommonYargsOptions>) {
 					"r2-secret-access-key",
 					"r2-prefix",
 					"compression",
-					"file-template",
-					"partition-template",
 				],
 				`${chalk.bold("Destination settings")}`
 			)
@@ -158,21 +151,14 @@ export function addUpdateOptions(yargs: Argv<CommonYargsOptions>) {
 				choices: ["none", "gzip", "deflate"],
 				demandOption: false,
 			})
-			.option("partition-template", {
-				type: "string",
-				describe: "Path template for partitioned files in the bucket",
+
+			// Pipeline settings
+			.group(["shard-count"], `${chalk.bold("Pipeline settings")}`)
+			.option("shard-count", {
+				type: "number",
+				describe:
+					"Number of shards for the pipeline. More shards handle higher request volume; fewer shards produce larger output files",
 				demandOption: false,
-			})
-			.option("file-template", {
-				type: "string",
-				describe: "Template for individual file names (must include ${slug})",
-				demandOption: false,
-				coerce: (val: string) => {
-					if (!val.includes("${slug}")) {
-						throw new Error("filename must contain ${slug}");
-					}
-					return val;
-				},
 			})
 	);
 }
@@ -233,42 +219,67 @@ export async function updatePipelineHandler(
 		}
 	}
 
-	if (args.enableWorkerBinding !== undefined) {
-		// strip off old source & keep if necessary
-		const source = pipelineConfig.source.find(
-			(s: Source) => s.type === "binding"
-		);
-		pipelineConfig.source = pipelineConfig.source.filter(
-			(s: Source) => s.type !== "binding"
-		);
-		// add back only if specified
-		if (args.enableWorkerBinding) {
-			pipelineConfig.source.push({
-				...source,
-				type: "binding",
-				format: "json",
-			});
+	if (args.source && args.source.length > 0) {
+		const existingSources = pipelineConfig.source;
+		pipelineConfig.source = []; // Reset the list
+
+		const sourceHandlers: Record<string, () => Source> = {
+			http: (): HttpSource => {
+				const existing = existingSources.find((s: Source) => s.type === "http");
+
+				return {
+					...existing, // Copy over existing properties for forwards compatibility
+					type: "http",
+					format: "json",
+					...(args.requireHttpAuth && { authentication: args.requireHttpAuth }), // Include only if defined
+				};
+			},
+			worker: (): BindingSource => {
+				const existing = existingSources.find(
+					(s: Source) => s.type === "binding"
+				);
+
+				return {
+					...existing, // Copy over existing properties for forwards compatibility
+					type: "binding",
+					format: "json",
+				};
+			},
+		};
+
+		for (const source of args.source) {
+			const handler = sourceHandlers[source];
+			if (handler) {
+				pipelineConfig.source.push(handler());
+			}
 		}
 	}
 
-	if (args.enableHttp !== undefined) {
-		// strip off old source & keep if necessary
-		const source = pipelineConfig.source.find((s: Source) => s.type === "http");
-		pipelineConfig.source = pipelineConfig.source.filter(
-			(s: Source) => s.type !== "http"
+	if (pipelineConfig.source.length === 0) {
+		throw new UserError(
+			"No sources have been enabled. At least one source (HTTP or Worker Binding) should be enabled"
 		);
-		// add back if specified
-		if (args.enableHttp) {
-			const update = {
-				type: "http",
-				format: "json",
-				...source,
-			} satisfies HttpSource;
+	}
 
-			pipelineConfig.source.push(update);
+	if (args.transformWorker) {
+		if (args.transformWorker === "none") {
+			// Unset transformations
+			pipelineConfig.transforms = [];
+		} else {
+			pipelineConfig.transforms.push(parseTransform(args.transformWorker));
 		}
 	}
 
+	if (args.r2Prefix) {
+		pipelineConfig.destination.path.prefix = args.r2Prefix;
+	}
+
+	if (args.shardCount) {
+		pipelineConfig.metadata.shards = args.shardCount;
+	}
+
+	// This covers the case where `--source` wasn't passed but `--cors-origins` or
+	// `--require-http-auth` was.
 	const httpSource = pipelineConfig.source.find(
 		(s: Source) => s.type === "http"
 	);
@@ -276,29 +287,15 @@ export async function updatePipelineHandler(
 		if (args.requireHttpAuth) {
 			httpSource.authentication = args.requireHttpAuth;
 		}
-		if (args.corsOrigins && args.corsOrigins.length > 0) {
+		if (args.corsOrigins) {
 			httpSource.cors = { origins: args.corsOrigins };
 		}
 	}
 
-	if (args.transformWorker) {
-		pipelineConfig.transforms.push(parseTransform(args.transformWorker));
-	}
-
-	if (args.r2Prefix) {
-		pipelineConfig.destination.path.prefix = args.r2Prefix;
-	}
-	if (args.partitionTemplate) {
-		pipelineConfig.destination.path.filepath = args.partitionTemplate;
-	}
-	if (args.fileTemplate) {
-		pipelineConfig.destination.path.filename = args.fileTemplate;
-	}
-
-	logger.log(`🌀 Updating Pipeline "${name}"`);
+	logger.log(`🌀 Updating pipeline "${name}"`);
 	const pipeline = await updatePipeline(accountId, name, pipelineConfig);
 
 	logger.log(
-		`✅ Successfully updated Pipeline "${pipeline.name}" with ID ${pipeline.id}\n`
+		`✅ Successfully updated pipeline "${pipeline.name}" with ID ${pipeline.id}\n`
 	);
 }

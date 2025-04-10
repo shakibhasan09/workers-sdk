@@ -21,6 +21,7 @@ const generate = async (ctx: C3Context) => {
 		ctx.project.name,
 		"--packageManager",
 		npm,
+		"--no-install",
 		gitFlag,
 	]);
 
@@ -124,6 +125,7 @@ const config: TemplateConfig = {
 	id: "nuxt",
 	frameworkCli: "nuxi",
 	platform: "pages",
+	hidden: true,
 	displayName: "Nuxt",
 	copyFiles: {
 		path: "./templates",

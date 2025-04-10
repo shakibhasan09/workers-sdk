@@ -1,6 +1,7 @@
 import { kCurrentWorker, Miniflare } from "miniflare";
 import { getAssetsOptions } from "../../../assets";
 import { readConfig } from "../../../config";
+import { partitionDurableObjectBindings } from "../../../deployment-bundle/entry";
 import { DEFAULT_MODULE_RULES } from "../../../deployment-bundle/rules";
 import { getBindings } from "../../../dev";
 import { getBoundRegisteredWorkers } from "../../../dev-registry";
@@ -11,7 +12,9 @@ import {
 	buildSitesOptions,
 } from "../../../dev/miniflare";
 import { run } from "../../../experimental-flags";
-import { getLegacyAssetPaths, getSiteAssetPaths } from "../../../sites";
+import { logger } from "../../../logger";
+import { getSiteAssetPaths } from "../../../sites";
+import { dedent } from "../../../utils/dedent";
 import { CacheStorage } from "./caches";
 import { ExecutionContext } from "./executionContext";
 import { getServiceBindings } from "./services";
@@ -45,7 +48,7 @@ export type GetPlatformProxyOptions = {
 	configPath?: string;
 	/**
 	 * Indicates if and where to persist the bindings data, if not present or `true` it defaults to the same location
-	 * used by wrangler v3: `.wrangler/state/v3` (so that the same data can be easily used by the caller and wrangler).
+	 * used by wrangler: `.wrangler/state/v3` (so that the same data can be easily used by the caller and wrangler).
 	 * If `false` is specified no data is persisted on the filesystem.
 	 */
 	persist?: boolean | { path: string };
@@ -105,7 +108,6 @@ export async function getPlatformProxy<
 		{
 			MULTIWORKER: false,
 			RESOURCES_PROVISION: false,
-			ASSETS_RPC: false,
 		},
 		() => getMiniflareOptionsFromConfig(rawConfig, env, options)
 	);
@@ -130,6 +132,7 @@ export async function getPlatformProxy<
 	};
 }
 
+// this is only used by getPlatformProxy
 async function getMiniflareOptionsFromConfig(
 	rawConfig: Config,
 	env: string | undefined,
@@ -137,6 +140,19 @@ async function getMiniflareOptionsFromConfig(
 ): Promise<Partial<MiniflareOptions>> {
 	const bindings = getBindings(rawConfig, env, true, {});
 
+	if (rawConfig["durable_objects"]) {
+		const { localBindings } = partitionDurableObjectBindings(rawConfig);
+		if (localBindings.length > 0) {
+			logger.warn(dedent`
+				You have defined bindings to the following internal Durable Objects:
+				${localBindings.map((b) => `- ${JSON.stringify(b)}`).join("\n")}
+				These will not work in local development, but they should work in production.
+
+				If you want to develop these locally, you can define your DO in a separate Worker, with a separate configuration file.
+				For detailed instructions, refer to the Durable Objects section here: https://developers.cloudflare.com/workers/wrangler/api#supported-bindings
+				`);
+		}
+	}
 	const workerDefinitions = await getBoundRegisteredWorkers({
 		name: rawConfig.name,
 		services: bindings.services,
@@ -144,7 +160,7 @@ async function getMiniflareOptionsFromConfig(
 	});
 
 	const { bindingOptions, externalWorkers } = buildMiniflareBindingOptions({
-		name: undefined,
+		name: rawConfig.name,
 		bindings,
 		workerDefinitions,
 		queueConsumers: undefined,
@@ -163,6 +179,7 @@ async function getMiniflareOptionsFromConfig(
 			{
 				script: "",
 				modules: true,
+				name: rawConfig.name,
 				...bindingOptions,
 				serviceBindings: {
 					...serviceBindings,
@@ -243,15 +260,18 @@ export interface Unstable_MiniflareWorkerOptions {
 
 export function unstable_getMiniflareWorkerOptions(
 	configPath: string,
-	env?: string
+	env?: string,
+	options?: { imagesLocalMode: boolean }
 ): Unstable_MiniflareWorkerOptions;
 export function unstable_getMiniflareWorkerOptions(
 	config: Config,
-	env?: string
+	env?: string,
+	options?: { imagesLocalMode: boolean }
 ): Unstable_MiniflareWorkerOptions;
 export function unstable_getMiniflareWorkerOptions(
 	configOrConfigPath: string | Config,
-	env?: string
+	env?: string,
+	options?: { imagesLocalMode: boolean }
 ): Unstable_MiniflareWorkerOptions {
 	const config =
 		typeof configOrConfigPath === "string"
@@ -275,7 +295,7 @@ export function unstable_getMiniflareWorkerOptions(
 		services: [],
 		serviceBindings: {},
 		migrations: config.migrations,
-		imagesLocalMode: false,
+		imagesLocalMode: !!options?.imagesLocalMode,
 	});
 
 	// This function is currently only exported for the Workers Vitest pool.
@@ -315,10 +335,8 @@ export function unstable_getMiniflareWorkerOptions(
 		);
 	}
 
-	const legacyAssetPaths = config.legacy_assets
-		? getLegacyAssetPaths(config, undefined)
-		: getSiteAssetPaths(config);
-	const sitesOptions = buildSitesOptions({ legacyAssetPaths });
+	const sitesAssetPaths = getSiteAssetPaths(config);
+	const sitesOptions = buildSitesOptions({ legacyAssetPaths: sitesAssetPaths });
 	const processedAssetOptions = getAssetsOptions({ assets: undefined }, config);
 	const assetOptions = processedAssetOptions
 		? buildAssetOptions({ assets: processedAssetOptions })
